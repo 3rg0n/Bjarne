@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:ampcode.com)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

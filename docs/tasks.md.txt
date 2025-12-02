@@ -1,0 +1,24 @@
+# TASKS
+_Last reviewed: YYYY-MM-DD_
+
+## Active
+- [ ] Capsule 01 – walking skeleton
+- [ ] Capsule 02 – user upload endpoint
+
+## Backlog
+- [ ] Capsule 03 – CSV analysis summary
+- [ ] Capsule 04 – error-handling middleware
+
+## Completed
+- [x] Capsule 00 – repo setup
+
+---
+
+### Rules
+- Keep 1–3 items active (WIP ≤ 3)
+- When done:
+  1. Update `PROJECT_STATE.md`
+  2. Commit with capsule ID (`feat(...): ... (#capsule-XX)`)
+  3. Move to Completed section
+
+> This file reflects *now*, not history. Use Git for history.
