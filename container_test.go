@@ -55,7 +55,7 @@ func TestCodeUsesThreads(t *testing.T) {
 func TestGetImageName(t *testing.T) {
 	// Default image name
 	name := getImageName()
-	if name != "ghcr.io/3rg0n/bjarne-validator:latest" {
+	if name != "bjarne-validator:local" {
 		t.Errorf("getImageName() = %q, want default image name", name)
 	}
 

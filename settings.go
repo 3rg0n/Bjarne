@@ -83,7 +83,7 @@ func DefaultSettings() *Settings {
 			MaxPerSession:  150000,
 		},
 		Container: ContainerSettings{
-			Image: "ghcr.io/3rg0n/bjarne-validator:latest",
+			Image: "bjarne-validator:local",
 		},
 		Theme: ThemeSettings{
 			Name: "default",

@@ -46,7 +46,7 @@ func getImageName() string {
 		return img
 	}
 	// Default to ghcr.io hosted image
-	return "ghcr.io/3rg0n/bjarne-validator:latest"
+	return "bjarne-validator:local"
 }
 
 // GetBinary returns the container runtime binary name
