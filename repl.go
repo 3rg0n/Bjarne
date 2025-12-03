@@ -393,46 +393,36 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		s.lastCode = code
 		s.lastValidated = false
 
-		if iteration > 1 {
-			fmt.Printf("\n%s\n", s.theme.Warning(fmt.Sprintf("Iteration %d/%d:", iteration, maxIter)))
+		// Show code (collapsed for iterations > 1)
+		if iteration == 1 {
+			fmt.Printf("\n%s\n", s.theme.Info("Generated code:"))
+			fmt.Println("```cpp")
+			fmt.Println(code)
+			fmt.Println("```")
 		}
 
-		fmt.Printf("\n%s\n", s.theme.Info("Generated code:"))
-		fmt.Println("```cpp")
-		fmt.Println(code)
-		fmt.Println("```")
-
-		// Run validation pipeline
-		fmt.Printf("\n%s\n", s.theme.Info("Validating..."))
-		results, err := s.container.ValidateCode(ctx, code, "code.cpp")
-		if err != nil {
-			fmt.Printf("%s %v\n", s.theme.Error("Validation error:"), err)
-			return nil
-		}
-
-		fmt.Println(FormatResults(results))
-
-		// Check if all passed
-		allPassed := true
-		var failedErrors string
-		for _, r := range results {
-			if !r.Success {
-				allPassed = false
-				failedErrors += fmt.Sprintf("Stage %s failed:\n%s\n", r.Stage, r.Error)
-			}
-		}
+		// Run validation with spinner UI
+		fmt.Println()
+		results, failedErrors, allPassed := s.runValidationWithSpinner(ctx, code)
 
 		if allPassed {
 			s.lastValidated = true
-			fmt.Println(s.theme.Success("✓ All validation passed!"))
+			fmt.Printf("\n%s\n", s.theme.Success("✓ All validation passed!"))
 			fmt.Println("Use /save <filename> to save the validated code")
 			return nil
 		}
 
 		// Check if we have iterations left
 		if iteration >= maxIter {
-			fmt.Println(s.theme.Error(fmt.Sprintf("Validation failed after %d attempts.", maxIter)))
-			fmt.Println("You can manually ask me to fix specific issues.")
+			fmt.Printf("\n%s\n", s.theme.Error(fmt.Sprintf("Validation failed after %d attempts.", maxIter)))
+			// Show the actual errors on final failure
+			fmt.Println("\nErrors:")
+			for _, r := range results {
+				if !r.Success {
+					fmt.Printf("  %s: %s\n", s.theme.Error(r.Stage), truncateError(r.Error, 200))
+				}
+			}
+			fmt.Println("\nYou can manually ask me to fix specific issues.")
 			return nil
 		}
 
@@ -441,9 +431,9 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		if s.config.EscalateOnFailure && escalationIndex < len(s.config.EscalationModels) {
 			fixModel = s.config.EscalationModels[escalationIndex]
 			escalationIndex++
-			fmt.Printf("%s Escalating to %s for fix attempt...\n", s.theme.Warning("⬆"), shortModelName(fixModel))
+			fmt.Printf("\n%s Escalating to %s...\n", s.theme.Warning("⬆"), shortModelName(fixModel))
 		} else {
-			fmt.Printf("%s Attempting fix (%d/%d)...\n", s.theme.Warning("Validation failed."), iteration+1, maxIter)
+			fmt.Printf("\n%s Iterating... (attempt %d/%d)\n", s.theme.Warning("↻"), iteration+1, maxIter)
 		}
 
 		iterationPrompt := fmt.Sprintf(IterationPromptTemplate, failedErrors)
@@ -454,11 +444,16 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 			Content: iterationPrompt,
 		})
 
-		// Call Bedrock for fix with potentially escalated model
+		// Show spinner while generating fix
+		spinner := NewSpinner("Generating fix...", s.theme)
+		spinner.Start()
+
 		iterResult, err := s.bedrock.GenerateWithModel(ctx, fixModel, GenerationSystemPrompt, s.conversation, s.config.MaxTokens)
 		if err != nil {
+			spinner.Fail("Generation failed")
 			return fmt.Errorf("iteration failed: %w", err)
 		}
+		spinner.Success("Fix generated")
 
 		// Track tokens
 		ok, tokenMsg := s.tokenTracker.Add(iterResult.InputTokens, iterResult.OutputTokens)
@@ -486,10 +481,57 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		}
 
 		code = newCode
-		currentModel = fixModel // Update current model for display purposes
+		currentModel = fixModel
 	}
 
 	return nil
+}
+
+// runValidationWithSpinner runs validation with a spinner UI for each stage
+func (s *Session) runValidationWithSpinner(ctx context.Context, code string) ([]ValidationResult, string, bool) {
+	results, err := s.container.ValidateCodeWithProgress(ctx, code, "code.cpp", func(stage string, running bool, result *ValidationResult) {
+		if running {
+			// Stage starting - show spinner would go here but we use simpler approach
+			fmt.Printf("  %s %s...", s.theme.Info("⠋"), stage)
+		} else if result != nil {
+			// Stage complete
+			fmt.Printf("\r\033[K") // Clear line
+			if result.Success {
+				fmt.Printf("  %s %s (%.2fs)\n", s.theme.Success("✓"), stage, result.Duration.Seconds())
+			} else {
+				fmt.Printf("  %s %s (%.2fs)\n", s.theme.Error("✗"), stage, result.Duration.Seconds())
+			}
+		}
+	})
+
+	if err != nil {
+		fmt.Printf("  %s validation error: %v\n", s.theme.Error("✗"), err)
+		return nil, err.Error(), false
+	}
+
+	// Check results
+	allPassed := true
+	var failedErrors string
+	for _, r := range results {
+		if !r.Success {
+			allPassed = false
+			failedErrors += fmt.Sprintf("Stage %s failed:\n%s\n", r.Stage, r.Error)
+		}
+	}
+
+	return results, failedErrors, allPassed
+}
+
+// truncateError truncates an error message to maxLen characters
+func truncateError(err string, maxLen int) string {
+	// Get first line only
+	if idx := strings.Index(err, "\n"); idx > 0 {
+		err = err[:idx]
+	}
+	if len(err) > maxLen {
+		return err[:maxLen-3] + "..."
+	}
+	return err
 }
 
 // parseDifficulty extracts the difficulty tag from bjarne's reflection

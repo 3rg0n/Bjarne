@@ -77,8 +77,16 @@ type ValidationResult struct {
 	Duration time.Duration
 }
 
+// ProgressCallback is called during validation to report progress
+type ProgressCallback func(stage string, running bool, result *ValidationResult)
+
 // ValidateCode runs the full validation pipeline on a code string
 func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filename string) ([]ValidationResult, error) {
+	return c.ValidateCodeWithProgress(ctx, code, filename, nil)
+}
+
+// ValidateCodeWithProgress runs the full validation pipeline with progress callbacks
+func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code string, filename string, progress ProgressCallback) ([]ValidationResult, error) {
 	// Create temp directory for the code
 	tmpDir, err := os.MkdirTemp("", "bjarne-validate-*")
 	if err != nil {
@@ -94,17 +102,29 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 
 	var results []ValidationResult
 
-	// Stage 1: clang-tidy (static analysis) - verbose output
-	result := c.runValidationStage(ctx, tmpDir, "clang-tidy",
+	// Helper to run a stage with progress
+	runStage := func(stage string, command ...string) ValidationResult {
+		if progress != nil {
+			progress(stage, true, nil)
+		}
+		result := c.runValidationStage(ctx, tmpDir, stage, command...)
+		if progress != nil {
+			progress(stage, false, &result)
+		}
+		return result
+	}
+
+	// Stage 1: clang-tidy (static analysis)
+	result := runStage("clang-tidy",
 		"clang-tidy", "-header-filter=.*", "/src/"+filename, "--", "-std=c++17", "-Wall", "-Wextra")
 	results = append(results, result)
 	if !result.Success {
 		return results, nil // Fail fast
 	}
 
-	// Stage 2: Compile with strict warnings (verbose)
-	result = c.runValidationStage(ctx, tmpDir, "compile",
-		"clang++", "-v", "-std=c++17", "-Wall", "-Wextra", "-Werror",
+	// Stage 2: Compile with strict warnings
+	result = runStage("compile",
+		"clang++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
 		"-fstack-protector-all", "-D_FORTIFY_SOURCE=2",
 		"-o", "/tmp/test", "/src/"+filename)
 	results = append(results, result)
@@ -112,19 +132,19 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 		return results, nil
 	}
 
-	// Stage 3: ASAN (AddressSanitizer) with verbose sanitizer output
-	result = c.runValidationStage(ctx, tmpDir, "asan",
+	// Stage 3: ASAN (AddressSanitizer)
+	result = runStage("asan",
 		"sh", "-c",
-		"ASAN_OPTIONS=verbosity=1:detect_leaks=1 clang++ -std=c++17 -fsanitize=address -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && ASAN_OPTIONS=verbosity=1:detect_leaks=1 /tmp/test")
+		"clang++ -std=c++17 -fsanitize=address -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
 	results = append(results, result)
 	if !result.Success {
 		return results, nil
 	}
 
-	// Stage 4: UBSAN (UndefinedBehaviorSanitizer) with verbose output
-	result = c.runValidationStage(ctx, tmpDir, "ubsan",
+	// Stage 4: UBSAN (UndefinedBehaviorSanitizer)
+	result = runStage("ubsan",
 		"sh", "-c",
-		"UBSAN_OPTIONS=print_stacktrace=1:verbosity=1 clang++ -std=c++17 -fsanitize=undefined -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && UBSAN_OPTIONS=print_stacktrace=1:verbosity=1 /tmp/test")
+		"clang++ -std=c++17 -fsanitize=undefined -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
 	results = append(results, result)
 	if !result.Success {
 		return results, nil
@@ -132,9 +152,9 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 
 	// Stage 5: Check if code uses threads, run TSAN if so
 	if codeUsesThreads(code) {
-		result = c.runValidationStage(ctx, tmpDir, "tsan",
+		result = runStage("tsan",
 			"sh", "-c",
-			"TSAN_OPTIONS=verbosity=1 clang++ -std=c++17 -fsanitize=thread -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && TSAN_OPTIONS=verbosity=1 /tmp/test")
+			"clang++ -std=c++17 -fsanitize=thread -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
 		results = append(results, result)
 		if !result.Success {
 			return results, nil
@@ -142,7 +162,7 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 	}
 
 	// Stage 6: Final run (clean execution)
-	result = c.runValidationStage(ctx, tmpDir, "run",
+	result = runStage("run",
 		"sh", "-c",
 		"clang++ -std=c++17 -O2 -o /tmp/test /src/"+filename+" && /tmp/test")
 	results = append(results, result)
