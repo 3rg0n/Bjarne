@@ -115,7 +115,7 @@ func Run() error {
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
-		fmt.Print("\033[94mYou:\033[0m ")
+		fmt.Print("\033[94m>\033[0m ")
 
 		if !scanner.Scan() {
 			break

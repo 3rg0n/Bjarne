@@ -148,10 +148,10 @@ Environment Variables:
 Examples:
   # Interactive mode
   $ bjarne
-  You: write a thread-safe counter in C++
+  > write a thread-safe counter in C++
   bjarne: Generating... Validating... ✓
   [validated code displayed]
-  You: /save counter.cpp
+  > /save counter.cpp
 
   # Validate-only mode
   $ bjarne --validate mycode.cpp
