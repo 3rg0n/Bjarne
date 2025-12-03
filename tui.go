@@ -115,7 +115,7 @@ type tickMsg time.Time
 func NewModel(bedrock *BedrockClient, container *ContainerRuntime, cfg *Config) Model {
 	// Create textarea for input
 	ta := textarea.New()
-	ta.Placeholder = "Enter your request..."
+	ta.Placeholder = "What would you have me create?"
 	ta.Focus()
 	ta.CharLimit = 0 // No limit
 	ta.SetWidth(80)
