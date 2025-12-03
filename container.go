@@ -159,7 +159,7 @@ func (c *ContainerRuntime) runValidationStage(ctx context.Context, tmpDir, stage
 		"run", "--rm",
 		"--network", "none", // No network access
 		"--read-only",                               // Read-only root filesystem
-		"--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", // Writable /tmp for compilation
+		"--tmpfs", "/tmp:rw,exec,nosuid,size=64m", // Writable /tmp for compilation and execution
 		"-v", tmpDir + ":/src:ro", // Mount code read-only
 		"--timeout", "120", // 2 minute timeout
 		c.imageName,
