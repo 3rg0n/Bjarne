@@ -112,16 +112,20 @@ type tickMsg time.Time
 
 // NewModel creates a new bubbletea model
 func NewModel(bedrock *BedrockClient, container *ContainerRuntime, cfg *Config) Model {
-	// Create textarea for input - multi-line with dynamic height
+	// Create textarea for input
 	ta := textarea.New()
 	ta.Placeholder = "What would you have me create?"
 	ta.Focus()
 	ta.CharLimit = 0 // No limit
-	ta.SetWidth(80)
-	ta.SetHeight(6) // Allow multi-line input
+	ta.SetWidth(78)
+	ta.SetHeight(1) // Single line, grows as needed
 	ta.ShowLineNumbers = false
-	// Shift+Enter for newlines, Enter to submit
-	ta.KeyMap.InsertNewline.SetKeys("shift+enter")
+	ta.Prompt = "" // No prompt prefix (we draw our own >)
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle() // No highlight
+	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle()
+	ta.BlurredStyle.Prompt = lipgloss.NewStyle()
+	ta.KeyMap.InsertNewline.SetEnabled(false) // Enter submits, no newlines
 
 	// Create spinner - simple ASCII
 	s := spinner.New()
