@@ -18,6 +18,7 @@ type State int
 const (
 	StateInput State = iota
 	StateThinking
+	StateAcknowledging
 	StateGenerating
 	StateValidating
 )
@@ -100,6 +101,11 @@ type thinkingDoneMsg struct {
 }
 
 type generatingDoneMsg struct {
+	result *GenerateResult
+	err    error
+}
+
+type acknowledgeDoneMsg struct {
 	result *GenerateResult
 	err    error
 }
@@ -191,10 +197,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textarea.Reset()
 				m.textarea.Blur()
 
-				// If already analyzed, user response goes to generation
+				// If already analyzed, user response goes to acknowledgment then generation
 				if m.analyzed {
 					m.conversation = append(m.conversation, Message{Role: "user", Content: input})
-					return m.startGenerating()
+					return m.startAcknowledging()
 				}
 
 				// First input - start analysis
@@ -272,6 +278,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = StateInput
 		m.textarea.Focus()
 		return m, nil
+
+	case acknowledgeDoneMsg:
+		if msg.err != nil {
+			if m.ctx.Err() == context.Canceled {
+				return m, nil
+			}
+			m.addOutput(m.styles.Error.Render("Error: " + msg.err.Error()))
+			m.state = StateInput
+			m.textarea.Focus()
+			return m, nil
+		}
+		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
+		m.conversation = append(m.conversation, Message{Role: "assistant", Content: msg.result.Text})
+
+		// Show acknowledgment
+		m.addOutput("")
+		m.addOutput(m.styles.Info.Render("bjarne: ") + stripMarkdown(msg.result.Text))
+
+		// Proceed to generation
+		m.conversation = append(m.conversation, Message{Role: "user", Content: GenerateNowPrompt})
+		return m.startGenerating()
 
 	case generatingDoneMsg:
 		if msg.err != nil {
@@ -355,7 +382,7 @@ func (m Model) View() string {
 		b.WriteString(m.styles.Prompt.Render(">") + " ")
 		b.WriteString(m.textarea.View())
 
-	case StateThinking, StateGenerating, StateValidating:
+	case StateThinking, StateAcknowledging, StateGenerating, StateValidating:
 		elapsed := time.Since(m.startTime).Seconds()
 		status := fmt.Sprintf("esc to interrupt · %.0fs", elapsed)
 		if m.tokenCount > 0 {
@@ -429,6 +456,30 @@ func (m *Model) doThinking(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.bedrock.GenerateWithModel(ctx, m.config.ChatModel, ReflectionSystemPrompt, m.conversation, m.config.MaxTokens)
 		return thinkingDoneMsg{result: result, err: err}
+	}
+}
+
+func (m *Model) startAcknowledging() (Model, tea.Cmd) {
+	m.state = StateAcknowledging
+	m.statusMsg = "Processing response..."
+	m.startTime = time.Now()
+	m.tokenCount = 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.ctx = ctx
+	m.cancelFn = cancel
+
+	return *m, tea.Batch(
+		m.spinner.Tick,
+		m.doAcknowledging(ctx),
+		tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
+	)
+}
+
+func (m *Model) doAcknowledging(ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		result, err := m.bedrock.GenerateWithModel(ctx, m.config.ChatModel, AcknowledgeSystemPrompt, m.conversation, m.config.MaxTokens)
+		return acknowledgeDoneMsg{result: result, err: err}
 	}
 }
 

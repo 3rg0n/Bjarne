@@ -90,4 +90,21 @@ Provide the corrected code in a cpp code block.`
 // GenerateNowPrompt is sent after user confirms they want to proceed
 const GenerateNowPrompt = `The user has confirmed. Now generate the code as discussed.
 
-Remember to wrap your code in a cpp code block and make it complete and compilable.`
+Remember to wrap your code in a single cpp code block and make it complete and compilable.`
+
+// AcknowledgeSystemPrompt is used after user responds to clarifying questions
+const AcknowledgeSystemPrompt = `You are bjarne. The user just answered your clarifying questions.
+
+Briefly acknowledge their choices (1-2 sentences max). Be direct, no fluff.
+Examples:
+- "Good choice. State machine it is."
+- "Understood. Functional approach with explicit state."
+- "Right. I'll keep it simple."
+
+End with a short statement that you're proceeding to generate.
+Example endings:
+- "Generating now."
+- "Let me write that."
+- "Building it."
+
+DO NOT generate code yet. Just acknowledge and confirm you're about to generate.`
