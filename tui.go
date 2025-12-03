@@ -361,13 +361,24 @@ func (m *Model) addOutput(line string) {
 
 // drawBox creates a bordered box with a title
 func (m *Model) drawBox(title string, width int) {
-	// Top border
-	padding := width - len(title) - 2
-	leftPad := padding / 2
-	rightPad := padding - leftPad
-	m.addOutput(m.styles.Warning.Render(boxTopLeft + strings.Repeat(boxHorizontal, width) + boxTopRight))
+	// Calculate inner width (excluding the border characters)
+	innerWidth := width
+	titleLen := len(title)
+
+	// If title is longer than width, expand the box
+	if titleLen > innerWidth {
+		innerWidth = titleLen + 4 // Add some padding
+	}
+
+	// Calculate padding for centering
+	totalPadding := innerWidth - titleLen
+	leftPad := totalPadding / 2
+	rightPad := totalPadding - leftPad
+
+	// Draw box
+	m.addOutput(m.styles.Warning.Render(boxTopLeft + strings.Repeat(boxHorizontal, innerWidth) + boxTopRight))
 	m.addOutput(m.styles.Warning.Render(boxVertical + strings.Repeat(" ", leftPad) + title + strings.Repeat(" ", rightPad) + boxVertical))
-	m.addOutput(m.styles.Warning.Render(boxBottomLeft + strings.Repeat(boxHorizontal, width) + boxBottomRight))
+	m.addOutput(m.styles.Warning.Render(boxBottomLeft + strings.Repeat(boxHorizontal, innerWidth) + boxBottomRight))
 }
 
 func (m *Model) startThinking(prompt string) (Model, tea.Cmd) {
