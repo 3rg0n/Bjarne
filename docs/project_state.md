@@ -1,35 +1,54 @@
 # Project State
 
-_Last updated: 2025-12-02_
+_Last updated: 2025-12-03_
 
 ## Current Capabilities
 
-- Documentation framework established
-- 7 Architecture Decision Records (ADRs) defining core approach
-- Kanban workflow with 25 backlog items across 6 phases
-- Clear distribution strategy via GitHub Releases + ghcr.io
-- **Go CLI skeleton**: Builds and runs, with --version, --help, and REPL
-- **REPL commands**: /help, /save, /clear, /validate, /quit (placeholders for generation)
+**bjarne is functional!** The core workflow is complete:
+
+- **Code Generation**: Claude models via AWS Bedrock generate C/C++ code
+- **Automatic Validation**: All code passes through clang-tidy → ASAN → UBSAN → TSAN pipeline
+- **Iteration Loop**: Failed validation triggers automatic fix attempts (up to 3 iterations)
+- **User-Friendly**: Colored output, structured diagnostics, helpful error messages
+- **Cross-Platform**: Builds for Linux, macOS, Windows (amd64/arm64)
 
 ## What Exists
 
-- `docs/` — Project documentation (readme, decisions, project_state)
-- `tasks/` — Capsule template for task specifications
-- `kanban.md` — Active backlog and workflow tracking
+### Source Code
+- `main.go` — Entry point with --version, --help, and REPL startup
+- `repl.go` — Interactive REPL with /commands and iteration loop
+- `bedrock.go` — AWS Bedrock client for Claude models
+- `container.go` — Podman/Docker abstraction and validation orchestration
+- `parser.go` — Diagnostic parsers for clang-tidy and sanitizers
+- `prompts.go` — System prompts for code generation
+- `errors.go` — User-friendly error handling with suggestions
+
+### Tests
+- `container_test.go` — Tests for thread detection, image naming, result formatting
+- `repl_test.go` — Tests for code extraction and env var handling
+- `parser_test.go` — Tests for diagnostic parsing
+- `errors_test.go` — Tests for error formatting and suggestions
+
+### Container
+- `docker/Dockerfile` — Wolfi-based validation container (Clang 18+, sanitizers)
+- `docker/Dockerfile.ubuntu` — Ubuntu fallback for glibc environments
+
+### CI/CD
+- `.github/workflows/ci.yml` — Test, lint, build on push/PR
+- `.github/workflows/release.yml` — Cross-platform binary releases on tags
+- `.github/workflows/container.yml` — Container image builds to ghcr.io
+
+### Configuration
+- `.golangci.yml` — Linter configuration with gosec, errcheck, etc.
+- `go.mod`, `go.sum` — Go module definition and dependencies
+
+### Documentation
+- `docs/readme.md` — Project vision and scope
+- `docs/decisions.md` — 7 Architecture Decision Records (ADRs)
+- `docs/project_state.md` — This file
+- `docs/installation.md` — Installation guide
+- `kanban.md` — Task tracking
 - `CLAUDE.md` — AI guidance document
-- `amp.agent.md` — Reference implementation from Amp (Go patterns)
-- `main.go` — Entry point with --version and --help flags
-- `repl.go` — Interactive REPL loop with /command support
-- `go.mod` — Go module definition
-- `.gitignore` — Git ignore patterns
-
-## What Does NOT Exist Yet
-
-- Bedrock client integration
-- Validation container (Dockerfile)
-- Validation pipeline
-- GitHub Actions workflows
-- Test suite
 
 ## Technical Decisions (ADRs)
 
@@ -43,67 +62,40 @@ _Last updated: 2025-12-02_
 | ADR-006 | GitHub Registry distribution (ghcr.io) |
 | ADR-007 | Development in WSL2 on Windows 11 |
 
-## Constraints
+## Test Coverage
 
-- **Stack:** Go (single binary, Amp-proven agent pattern)
-- **Container Runtime:** Podman primary, Docker fallback
-- **AI Integration:** AWS Bedrock with Claude models
-  - Model IDs from environment variables
-  - `global.` prefix for inference profiles
-- **Architecture:** CLI-orchestrated pipeline with **mandatory validation**
-- **Distribution:** GitHub Releases (binaries) + ghcr.io (container)
+34 tests covering:
+- Code extraction from markdown
+- Thread detection in code
+- Diagnostic parsing (clang-tidy, ASAN, UBSAN, TSAN)
+- Result formatting
+- Error handling and suggestions
+- Configuration helpers
 
-## Known Risks / Issues
+## Known Limitations
 
-- Single-file limitation initially (multi-file support is complex)
-- MSAN only works on Linux (not macOS or Windows containers)
-- Filesystem performance slower when developing on /mnt/c/ in WSL2
-- Container image size could be large (Clang + tools)
+- Single-file only (no multi-file project support yet)
+- MSAN only works on Linux (not in container yet)
+- No streaming output during generation
+- Fixed iteration limit (3 attempts)
 
-## Upcoming Work
+## Remaining Work
 
-1. **T-004:** Initialize Go module and project structure
-2. **T-005:** Implement basic agent loop (Amp pattern)
-3. **T-006:** Add AWS Bedrock client
+### Phase 5 (Distribution)
+- [ ] T-025: Installation documentation (in progress)
 
-See `kanban.md` for full backlog (24 items across 5 phases).
+### Phase 6 (Polish)
+- [ ] T-026: Add iteration limits / token budget
+- [ ] T-027: Model selection via flags (env vars done)
+- [ ] T-028: Validate-only mode for existing code
 
-## Directory Sketch (Target)
+### Icebox
+- T-029: llm-guard integration for prompt scanning
+- T-030: codeguard safe-c-functions rules
+- T-031: Toolchain hardening flags
+- Future: Multi-file projects, IDE integration, Web interface
 
-```text
-bjarne/
-├── main.go               # Entry point, agent initialization
-├── agent.go              # Agent loop, conversation management
-├── tools.go              # Tool definitions and implementations
-├── bedrock.go            # AWS Bedrock client wrapper
-├── container.go          # Podman/Docker abstraction
-├── validator.go          # Validation orchestration
-├── parsers/
-│   ├── tidy.go          # clang-tidy output parser
-│   └── sanitizer.go     # ASAN/UBSAN/TSAN output parser
-│
-├── docker/
-│   └── Dockerfile       # bjarne-validator container
-│
-├── .github/
-│   └── workflows/
-│       ├── build.yml    # Cross-platform binary builds
-│       └── release.yml  # GitHub Release + ghcr.io push
-│
-├── docs/
-│   ├── readme.md
-│   ├── project_state.md
-│   └── decisions.md
-│
-├── tasks/
-│   └── capsule-template.md
-│
-├── kanban.md
-├── CLAUDE.md
-├── go.mod
-├── go.sum
-└── .gitignore
-```
+See `kanban.md` for full backlog.
 
 ## Architecture
 
@@ -133,7 +125,7 @@ bjarne/
                                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   bjarne-validator Container                    │
-│                         (ghcr.io)                               │
+│                 (ghcr.io/ecopelan/bjarne-validator)             │
 ├─────────────────────────────────────────────────────────────────┤
 │  Pipeline: clang-tidy → compile → ASAN → UBSAN → [TSAN] → run  │
 │                                                                 │
@@ -141,77 +133,9 @@ bjarne/
 │  • AddressSanitizer (ASAN)                                     │
 │  • UndefinedBehaviorSanitizer (UBSAN)                          │
 │  • ThreadSanitizer (TSAN) — if threads detected                │
-│  • MemorySanitizer (MSAN) — Linux only                         │
 └─────────────────────────────────────────────────────────────────┘
-```
-
-**Flow:**
-```
-User Prompt
-    │
-    ▼
-bjarne calls Bedrock (Claude generates code)
-    │
-    ▼
-bjarne runs validation pipeline in container
-    │
-    ├── FAIL → bjarne sends errors back to Claude → iterate
-    │
-    └── PASS → bjarne displays validated code to user
-                    │
-                    ▼
-              User: /save filename.cpp
-```
-
-## User Flow
-
-```
-$ bjarne
-bjarne v0.1.0
-
-Checking for validation container...
-Container found: ghcr.io/<org>/bjarne-validator:latest
-
-Chat with bjarne (use 'ctrl-c' to quit)
-
-You: write a thread-safe counter in C++
-
-Claude: I'll create a thread-safe counter using std::atomic. Let me validate it first.
-
-tool: validate_code({...})
-
-Claude: The code passed all validation gates:
-✓ clang-tidy (no warnings)
-✓ Compilation (success)
-✓ ASAN (no memory errors)
-✓ UBSAN (no undefined behavior)
-✓ TSAN (no data races)
-✓ Runtime (executed successfully)
-
-Here's the validated code:
-
-```cpp
-#include <atomic>
-#include <iostream>
-
-class ThreadSafeCounter {
-    std::atomic<int> count{0};
-public:
-    void increment() { ++count; }
-    void decrement() { --count; }
-    int get() const { return count.load(); }
-};
-```
-
-Would you like me to save this to a file?
-
-You: yes, save to counter.cpp
-
-tool: write_output({"path": "counter.cpp", ...})
-
-Claude: Saved to counter.cpp
 ```
 
 ---
 
-> Current phase: Planning complete. Ready for implementation (T-004).
+> Current phase: **Phases 1-4 complete. Phase 5 mostly complete. Ready for Phase 6 polish.**
