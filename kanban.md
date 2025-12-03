@@ -24,6 +24,10 @@ _Last updated: 2025-12-03_
 | T-011 | Parse clang-tidy output for display | 2025-12-03 |
 | T-012 | Parse sanitizer output (ASAN/UBSAN/TSAN) for display | 2025-12-03 |
 | T-014 | Implement iteration loop (validation fails → re-generate) | 2025-12-03 |
+| T-017 | First-run container pull experience | 2025-12-03 |
+| T-019 | Error handling and user-friendly messages | 2025-12-03 |
+| T-022 | GitHub Actions for cross-platform binaries | 2025-12-03 |
+| T-023 | GitHub Actions for container image | 2025-12-03 |
 
 ---
 
@@ -49,24 +53,24 @@ All Phase 2 tasks completed.
 
 All core workflow tasks completed (T-013, T-015, T-016 were implemented as part of earlier tasks).
 
-### Phase 4: User Experience (Medium Priority)
+### Phase 4: User Experience — COMPLETE
 
 | ID | Task | Dependencies | Status |
 |----|------|--------------|--------|
-| T-017 | First-run container pull experience | T-009 | Pending |
+| T-017 | First-run container pull experience | T-009 | ✓ Done |
 | T-018 | Add --version and --help flags | T-004 | ✓ Done (T-004) |
-| T-019 | Error handling and user-friendly messages | T-005 | Pending |
+| T-019 | Error handling and user-friendly messages | T-005 | ✓ Done |
 | T-020 | Colored terminal output | T-005 | ✓ Done (throughout) |
 | T-021 | Add `/` command menu | T-005 | ✓ Done (T-005) |
 
-### Phase 5: Distribution (Medium Priority)
+### Phase 5: Distribution — MOSTLY COMPLETE
 
-| ID | Task | Dependencies |
-|----|------|--------------|
-| T-022 | GitHub Actions: Build cross-platform binaries | T-018 |
-| T-023 | GitHub Actions: Build and push container to ghcr.io | T-008 |
-| T-024 | Create GitHub Release workflow (on tag) | T-022, T-023 |
-| T-025 | Write installation documentation | T-024 |
+| ID | Task | Dependencies | Status |
+|----|------|--------------|--------|
+| T-022 | GitHub Actions: Build cross-platform binaries | T-018 | ✓ Done |
+| T-023 | GitHub Actions: Build and push container to ghcr.io | T-008 | ✓ Done |
+| T-024 | Create GitHub Release workflow (on tag) | T-022, T-023 | ✓ Done (in release.yml) |
+| T-025 | Write installation documentation | T-024 | Pending |
 
 ### Phase 6: Polish (Low Priority)
 
@@ -144,12 +148,18 @@ All core workflow tasks completed (T-013, T-015, T-016 were implemented as part 
 - [x] Save command (implemented with T-005)
 - [x] System prompt for C/C++ (implemented with T-007)
 
-**Phase 4: User Experience** — IN PROGRESS
-- [ ] First-run container pull (T-017)
+**Phase 4: User Experience** — COMPLETE
+- [x] First-run container pull (T-017)
 - [x] --version and --help flags (implemented with T-004)
-- [ ] Error handling improvements (T-019)
+- [x] Error handling with suggestions (T-019)
 - [x] Colored terminal output (implemented throughout)
 - [x] /command menu (implemented with T-005)
+
+**Phase 5: Distribution** — MOSTLY COMPLETE
+- [x] GitHub Actions for CI (ci.yml)
+- [x] GitHub Actions for cross-platform binaries (release.yml)
+- [x] GitHub Actions for container image (container.yml)
+- [ ] Installation documentation (T-025)
 
 ---
 
