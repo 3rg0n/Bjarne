@@ -94,17 +94,17 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 
 	var results []ValidationResult
 
-	// Stage 1: clang-tidy (static analysis)
+	// Stage 1: clang-tidy (static analysis) - verbose output
 	result := c.runValidationStage(ctx, tmpDir, "clang-tidy",
-		"clang-tidy", "/src/"+filename, "--", "-std=c++17", "-Wall", "-Wextra")
+		"clang-tidy", "-header-filter=.*", "/src/"+filename, "--", "-std=c++17", "-Wall", "-Wextra")
 	results = append(results, result)
 	if !result.Success {
 		return results, nil // Fail fast
 	}
 
-	// Stage 2: Compile with strict warnings
+	// Stage 2: Compile with strict warnings (verbose)
 	result = c.runValidationStage(ctx, tmpDir, "compile",
-		"clang++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
+		"clang++", "-v", "-std=c++17", "-Wall", "-Wextra", "-Werror",
 		"-fstack-protector-all", "-D_FORTIFY_SOURCE=2",
 		"-o", "/tmp/test", "/src/"+filename)
 	results = append(results, result)
@@ -112,19 +112,19 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 		return results, nil
 	}
 
-	// Stage 3: ASAN (AddressSanitizer)
+	// Stage 3: ASAN (AddressSanitizer) with verbose sanitizer output
 	result = c.runValidationStage(ctx, tmpDir, "asan",
 		"sh", "-c",
-		"clang++ -std=c++17 -fsanitize=address -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
+		"ASAN_OPTIONS=verbosity=1:detect_leaks=1 clang++ -std=c++17 -fsanitize=address -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && ASAN_OPTIONS=verbosity=1:detect_leaks=1 /tmp/test")
 	results = append(results, result)
 	if !result.Success {
 		return results, nil
 	}
 
-	// Stage 4: UBSAN (UndefinedBehaviorSanitizer)
+	// Stage 4: UBSAN (UndefinedBehaviorSanitizer) with verbose output
 	result = c.runValidationStage(ctx, tmpDir, "ubsan",
 		"sh", "-c",
-		"clang++ -std=c++17 -fsanitize=undefined -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
+		"UBSAN_OPTIONS=print_stacktrace=1:verbosity=1 clang++ -std=c++17 -fsanitize=undefined -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && UBSAN_OPTIONS=print_stacktrace=1:verbosity=1 /tmp/test")
 	results = append(results, result)
 	if !result.Success {
 		return results, nil
@@ -134,7 +134,7 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 	if codeUsesThreads(code) {
 		result = c.runValidationStage(ctx, tmpDir, "tsan",
 			"sh", "-c",
-			"clang++ -std=c++17 -fsanitize=thread -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
+			"TSAN_OPTIONS=verbosity=1 clang++ -std=c++17 -fsanitize=thread -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && TSAN_OPTIONS=verbosity=1 /tmp/test")
 		results = append(results, result)
 		if !result.Success {
 			return results, nil
