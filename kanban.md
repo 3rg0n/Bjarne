@@ -1,6 +1,6 @@
 # Kanban Board
 
-_Last updated: 2025-12-02_
+_Last updated: 2025-12-03_
 
 **Project:** bjarne — AI-Assisted C/C++ Development with Validation Gates
 
@@ -21,6 +21,9 @@ _Last updated: 2025-12-02_
 | T-008 | Create Dockerfile with Clang 18+ and sanitizers | 2025-12-02 |
 | T-009 | Implement container runtime detection (podman/docker) | 2025-12-02 |
 | T-010 | Implement validation pipeline (clang-tidy → ASAN → UBSAN → TSAN) | 2025-12-02 |
+| T-011 | Parse clang-tidy output for display | 2025-12-03 |
+| T-012 | Parse sanitizer output (ASAN/UBSAN/TSAN) for display | 2025-12-03 |
+| T-014 | Implement iteration loop (validation fails → re-generate) | 2025-12-03 |
 
 ---
 
@@ -38,34 +41,23 @@ _Last updated: 2025-12-02_
 
 All Phase 1 tasks completed. Ready for Phase 2 (Validation Container).
 
-### Phase 2: Validation Container (High Priority)
+### Phase 2: Validation Container — COMPLETE
 
-| ID | Task | Dependencies |
-|----|------|--------------|
-| T-008 | Create Dockerfile with Clang 18+ and sanitizers | T-004 |
-| T-009 | Implement container runtime detection (podman/docker) | T-004 |
-| T-010 | Implement validation pipeline (clang-tidy → compile → ASAN → UBSAN → TSAN) | T-008, T-009 |
-| T-011 | Parse clang-tidy output for display | T-010 |
-| T-012 | Parse sanitizer output (ASAN/UBSAN/TSAN) for display | T-010 |
+All Phase 2 tasks completed.
 
-### Phase 3: Core Workflow (High Priority)
+### Phase 3: Core Workflow — COMPLETE
 
-| ID | Task | Dependencies |
-|----|------|--------------|
-| T-013 | Integrate generation → validation → display flow | T-007, T-010 |
-| T-014 | Implement iteration loop (validation fails → re-generate) | T-013 |
-| T-015 | Implement "save to file" command | T-013 |
-| T-016 | Add system prompt for C/C++ code generation | T-007 |
+All core workflow tasks completed (T-013, T-015, T-016 were implemented as part of earlier tasks).
 
 ### Phase 4: User Experience (Medium Priority)
 
-| ID | Task | Dependencies |
-|----|------|--------------|
-| T-017 | First-run container pull experience | T-009 |
-| T-018 | Add --version and --help flags | T-004 |
-| T-019 | Error handling and user-friendly messages | T-005 |
-| T-020 | Colored terminal output | T-005 |
-| T-021 | Add `/` command menu (future: /help, /save, /validate, /clear) | T-005 |
+| ID | Task | Dependencies | Status |
+|----|------|--------------|--------|
+| T-017 | First-run container pull experience | T-009 | Pending |
+| T-018 | Add --version and --help flags | T-004 | ✓ Done (T-004) |
+| T-019 | Error handling and user-friendly messages | T-005 | Pending |
+| T-020 | Colored terminal output | T-005 | ✓ Done (throughout) |
+| T-021 | Add `/` command menu | T-005 | ✓ Done (T-005) |
 
 ### Phase 5: Distribution (Medium Priority)
 
@@ -144,11 +136,20 @@ All Phase 1 tasks completed. Ready for Phase 2 (Validation Container).
 - [x] Dockerfile with Wolfi + Ubuntu fallback (T-008)
 - [x] Container runtime detection (T-009)
 - [x] Validation pipeline integration (T-010)
+- [x] Diagnostic parsers for clang-tidy and sanitizers (T-011, T-012)
 
-**Phase 3: Core Workflow** (Blocked by Phase 2)
-- [ ] Full flow integration (T-013)
-- [ ] Iteration loop (T-014)
-- [ ] Save command (T-015)
+**Phase 3: Core Workflow** — COMPLETE
+- [x] Full flow integration (implemented with T-005, T-010)
+- [x] Iteration loop (T-014)
+- [x] Save command (implemented with T-005)
+- [x] System prompt for C/C++ (implemented with T-007)
+
+**Phase 4: User Experience** — IN PROGRESS
+- [ ] First-run container pull (T-017)
+- [x] --version and --help flags (implemented with T-004)
+- [ ] Error handling improvements (T-019)
+- [x] Colored terminal output (implemented throughout)
+- [x] /command menu (implemented with T-005)
 
 ---
 
