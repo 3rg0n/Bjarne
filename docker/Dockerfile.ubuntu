@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libc++-21-dev \
     libc++abi-21-dev \
     libclang-rt-21-dev \
+    iwyu \
     make \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean

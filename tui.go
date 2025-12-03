@@ -23,6 +23,19 @@ const (
 	StateConfirm
 )
 
+// Box drawing characters for visual sections
+const (
+	boxTopLeft     = "╔"
+	boxTopRight    = "╗"
+	boxBottomLeft  = "╚"
+	boxBottomRight = "╝"
+	boxHorizontal  = "═"
+	boxVertical    = "║"
+	treeVert       = "│"
+	treeBranch     = "├─"
+	treeEnd        = "└─"
+)
+
 // Styles for the TUI
 type Styles struct {
 	Prompt    lipgloss.Style
@@ -198,7 +211,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Already handled by Esc
 				return m, nil
 			}
-			m.addOutput(m.styles.Error.Render("✗ Thinking failed: " + msg.err.Error()))
+			m.addOutput(m.styles.Error.Render("✗ Analysis failed: " + msg.err.Error()))
 			m.state = StateInput
 			m.textarea.Focus()
 			return m, nil
@@ -208,8 +221,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.conversation = append(m.conversation, Message{Role: "assistant", Content: msg.result.Text})
 
 		difficulty, reflection := parseDifficulty(msg.result.Text)
+
+		// Show feasibility analysis box
 		m.addOutput("")
-		m.addOutput(m.styles.Accent.Render("bjarne: ") + reflection)
+		m.drawBox("PROMPT FEASIBILITY ANALYSIS", 56)
+		m.addOutput("")
+
+		// Show difficulty with emoji
+		var diffIcon, diffColor string
+		switch difficulty {
+		case "EASY":
+			diffIcon = "✅"
+			diffColor = m.styles.Success.Render("EASY - High success probability")
+		case "MEDIUM":
+			diffIcon = "⚠️"
+			diffColor = m.styles.Warning.Render("MEDIUM - May require iteration")
+		case "COMPLEX":
+			diffIcon = "🔴"
+			diffColor = m.styles.Error.Render("COMPLEX - Multiple iterations likely")
+		}
+		m.addOutput(fmt.Sprintf("Feasibility: %s %s", diffIcon, diffColor))
+		m.addOutput("")
+		m.addOutput(m.styles.Dim.Render("Analysis: ") + reflection)
+		m.addOutput("")
 
 		if difficulty == "EASY" {
 			// Skip confirmation for easy tasks
@@ -218,7 +252,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.state = StateConfirm
-		m.addOutput("")
 		m.addOutput(m.styles.Dim.Render("Press Enter to proceed, Esc to cancel"))
 		return m, nil
 
@@ -326,11 +359,28 @@ func (m *Model) addOutput(line string) {
 	m.output = append(m.output, line)
 }
 
+// drawBox creates a bordered box with a title
+func (m *Model) drawBox(title string, width int) {
+	// Top border
+	padding := width - len(title) - 2
+	leftPad := padding / 2
+	rightPad := padding - leftPad
+	m.addOutput(m.styles.Warning.Render(boxTopLeft + strings.Repeat(boxHorizontal, width) + boxTopRight))
+	m.addOutput(m.styles.Warning.Render(boxVertical + strings.Repeat(" ", leftPad) + title + strings.Repeat(" ", rightPad) + boxVertical))
+	m.addOutput(m.styles.Warning.Render(boxBottomLeft + strings.Repeat(boxHorizontal, width) + boxBottomRight))
+}
+
 func (m *Model) startThinking(prompt string) (Model, tea.Cmd) {
 	m.state = StateThinking
-	m.statusMsg = "Thinking…"
+	m.statusMsg = "Analyzing request…"
 	m.startTime = time.Now()
 	m.tokenCount = 0
+
+	// Show the request
+	m.addOutput("")
+	m.addOutput(m.styles.Info.Render("Request: ") + fmt.Sprintf("%q", prompt))
+	m.addOutput("")
+	m.addOutput(m.styles.Info.Render("🔍 Analyzing prompt feasibility..."))
 
 	// Add user message
 	m.conversation = append(m.conversation, Message{Role: "user", Content: prompt})
@@ -356,9 +406,13 @@ func (m *Model) doThinking(ctx context.Context) tea.Cmd {
 
 func (m *Model) startGenerating() (Model, tea.Cmd) {
 	m.state = StateGenerating
-	m.statusMsg = fmt.Sprintf("Generating with %s…", shortModelName(m.config.GenerateModel))
+	m.statusMsg = fmt.Sprintf("Generating code with %s…", shortModelName(m.config.GenerateModel))
 	m.startTime = time.Now()
 	m.tokenCount = 0
+
+	m.addOutput("")
+	m.addOutput(m.styles.Info.Render("🔨 Starting code generation..."))
+	m.addOutput(fmt.Sprintf("   Model: %s", m.styles.Accent.Render(shortModelName(m.config.GenerateModel))))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx = ctx
@@ -380,8 +434,11 @@ func (m *Model) doGenerating(ctx context.Context) tea.Cmd {
 
 func (m *Model) startValidation() (Model, tea.Cmd) {
 	m.state = StateValidating
-	m.statusMsg = "Validating…"
+	m.statusMsg = "Running validation gates…"
 	m.startTime = time.Now()
+
+	m.addOutput("")
+	m.addOutput(m.styles.Info.Render("🔍 Validating code..."))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx = ctx
@@ -402,65 +459,74 @@ func (m *Model) doValidation(ctx context.Context) tea.Cmd {
 }
 
 func (m *Model) showValidationSuccess(results []ValidationResult) {
+	// Show gate results in tree style
+	totalTime := 0.0
+	for i, r := range results {
+		totalTime += r.Duration.Seconds()
+		prefix := treeBranch
+		if i == len(results)-1 {
+			prefix = treeEnd
+		}
+		m.addOutput(fmt.Sprintf("  %s Gate %d: %s...", prefix, i+1, r.Stage))
+		m.addOutput(fmt.Sprintf("  %s  %s %s", treeVert, m.styles.Success.Render("✓ Passed"), m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
+	}
+
 	m.addOutput("")
-	m.addOutput(m.styles.Success.Render("✓ Validated Code:"))
+	m.addOutput(fmt.Sprintf("  %s All validation gates passed", m.styles.Success.Render("✓")))
+	m.addOutput("")
+
+	// Success box with code
+	m.addOutput(strings.Repeat("=", 80))
+	m.addOutput(m.styles.Success.Render("✅ SUCCESS! Validated code:"))
+	m.addOutput(strings.Repeat("=", 80))
 	m.addOutput("```cpp")
 	m.addOutput(m.currentCode)
 	m.addOutput("```")
+	m.addOutput(strings.Repeat("=", 80))
 	m.addOutput("")
-	m.addOutput(m.styles.Success.Render("Validation Summary"))
-	m.addOutput(strings.Repeat("─", 50))
-
-	totalTime := 0.0
-	for _, r := range results {
-		totalTime += r.Duration.Seconds()
-		m.addOutput(fmt.Sprintf("  %s %s %s",
-			m.styles.Checkmark.Render("☑"),
-			r.Stage,
-			m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
-	}
-
-	m.addOutput(strings.Repeat("─", 50))
-	m.addOutput(fmt.Sprintf("  %s All %d stages passed %s",
-		m.styles.Success.Render("✓"),
-		len(results),
-		m.styles.Dim.Render(fmt.Sprintf("[%.2fs total]", totalTime))))
-	m.addOutput("")
+	m.addOutput(fmt.Sprintf("Total validation time: %s", m.styles.Dim.Render(fmt.Sprintf("%.2fs", totalTime))))
 	m.addOutput(fmt.Sprintf("Use %s to save the validated code", m.styles.Accent.Render("/save <filename>")))
 }
 
 func (m *Model) showValidationFailure(results []ValidationResult) {
-	m.addOutput("")
-	m.addOutput(m.styles.Error.Render("✗ Validation failed"))
-	m.addOutput(strings.Repeat("─", 50))
-
-	for _, r := range results {
+	// Show gate results in tree style
+	for i, r := range results {
+		prefix := treeBranch
+		if i == len(results)-1 {
+			prefix = treeEnd
+		}
+		m.addOutput(fmt.Sprintf("  %s Gate %d: %s...", prefix, i+1, r.Stage))
 		if r.Success {
-			m.addOutput(fmt.Sprintf("  %s %s %s",
-				m.styles.Checkmark.Render("☑"),
-				r.Stage,
-				m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
+			m.addOutput(fmt.Sprintf("  %s  %s %s", treeVert, m.styles.Success.Render("✓ Passed"), m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
 		} else {
-			m.addOutput(fmt.Sprintf("  %s %s %s",
-				m.styles.Cross.Render("☒"),
-				r.Stage,
-				m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
-			// Show first line of error
+			m.addOutput(fmt.Sprintf("  %s  %s %s", treeVert, m.styles.Error.Render("✗ Failed"), m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
+			// Show error details
 			if r.Error != "" {
 				errLines := strings.Split(r.Error, "\n")
-				if len(errLines) > 0 {
-					m.addOutput(fmt.Sprintf("      %s", m.styles.Dim.Render(truncateError(errLines[0], 60))))
+				for j, line := range errLines {
+					if j >= 3 {
+						m.addOutput(fmt.Sprintf("  %s  %s", treeVert, m.styles.Dim.Render("... (truncated)")))
+						break
+					}
+					if line != "" {
+						m.addOutput(fmt.Sprintf("  %s  %s", treeVert, m.styles.Dim.Render(truncateError(line, 70))))
+					}
 				}
 			}
 		}
 	}
 
-	m.addOutput(strings.Repeat("─", 50))
 	m.addOutput("")
-	m.addOutput(m.styles.Warning.Render("Last generated code (failed validation):"))
+	m.addOutput(strings.Repeat("=", 80))
+	m.addOutput(m.styles.Error.Render("❌ FAILED! Validation did not pass."))
+	m.addOutput(strings.Repeat("=", 80))
+	m.addOutput("")
+	m.addOutput(m.styles.Warning.Render("Generated code (failed validation):"))
 	m.addOutput("```cpp")
 	m.addOutput(m.currentCode)
 	m.addOutput("```")
+	m.addOutput("")
+	m.addOutput("You can refine your request or ask bjarne to fix specific issues.")
 }
 
 func (m Model) handleCommand(input string) (Model, tea.Cmd) {

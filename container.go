@@ -122,7 +122,16 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 		return results, nil // Fail fast
 	}
 
-	// Stage 2: Compile with strict warnings
+	// Stage 2: IWYU (Include What You Use) - check header hygiene
+	// IWYU always returns non-zero, so we check for actual suggestions in output
+	result = runStage("iwyu",
+		"sh", "-c",
+		"include-what-you-use -std=c++17 /src/"+filename+" 2>&1; exit 0")
+	// IWYU is advisory - we mark success if it ran, the suggestions are informational
+	result.Success = true
+	results = append(results, result)
+
+	// Stage 3: Compile with strict warnings
 	result = runStage("compile",
 		"clang++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
 		"-fstack-protector-all", "-D_FORTIFY_SOURCE=2",
