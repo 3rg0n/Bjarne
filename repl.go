@@ -315,33 +315,43 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		Content: reflectResult.Text,
 	})
 
-	// Display bjarne's reflection
-	fmt.Printf("\n%s %s\n\n", s.theme.Accent("bjarne:"), reflectResult.Text)
+	// Parse difficulty and display bjarne's reflection
+	difficulty, reflectionText := parseDifficulty(reflectResult.Text)
+	fmt.Printf("\n%s %s\n", s.theme.Accent("bjarne:"), reflectionText)
 
-	// Wait for user confirmation
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print(s.theme.PromptCode() + ">" + s.theme.Reset() + " ")
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-	response = strings.TrimSpace(strings.ToLower(response))
+	// For EASY tasks, skip confirmation and proceed directly
+	if difficulty == "EASY" {
+		s.conversation = append(s.conversation, Message{
+			Role:    "user",
+			Content: GenerateNowPrompt,
+		})
+	} else {
+		// Wait for user confirmation on MEDIUM/COMPLEX tasks
+		fmt.Println()
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Print(s.theme.PromptCode() + ">" + s.theme.Reset() + " ")
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+		response = strings.TrimSpace(strings.ToLower(response))
 
-	// Check for abort
-	if response == "n" || response == "no" || response == "abort" || response == "cancel" {
-		fmt.Println("Cancelled.")
-		return nil
-	}
+		// Check for abort
+		if response == "n" || response == "no" || response == "abort" || response == "cancel" {
+			fmt.Println("Cancelled.")
+			return nil
+		}
 
-	// Add user confirmation to conversation
-	userConfirm := response
-	if userConfirm == "" || userConfirm == "y" || userConfirm == "yes" {
-		userConfirm = "Yes, proceed."
+		// Add user confirmation to conversation
+		userConfirm := response
+		if userConfirm == "" || userConfirm == "y" || userConfirm == "yes" {
+			userConfirm = "Yes, proceed."
+		}
+		s.conversation = append(s.conversation, Message{
+			Role:    "user",
+			Content: userConfirm + "\n\n" + GenerateNowPrompt,
+		})
 	}
-	s.conversation = append(s.conversation, Message{
-		Role:    "user",
-		Content: userConfirm + "\n\n" + GenerateNowPrompt,
-	})
 
 	// Phase 2: Generation
 	fmt.Printf("\n%s Generating with %s...\n", s.theme.Info("bjarne:"), shortModelName(s.config.GenerateModel))
@@ -480,6 +490,26 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 	}
 
 	return nil
+}
+
+// parseDifficulty extracts the difficulty tag from bjarne's reflection
+// Returns the difficulty level (EASY, MEDIUM, COMPLEX) and the text without the tag
+func parseDifficulty(text string) (string, string) {
+	text = strings.TrimSpace(text)
+
+	// Check for difficulty tags at the start
+	for _, level := range []string{"EASY", "MEDIUM", "COMPLEX"} {
+		tag := "[" + level + "]"
+		if strings.HasPrefix(text, tag) {
+			// Remove the tag and any following whitespace/newline
+			remainder := strings.TrimPrefix(text, tag)
+			remainder = strings.TrimLeft(remainder, " \t\n")
+			return level, remainder
+		}
+	}
+
+	// No tag found - default to MEDIUM (requires confirmation)
+	return "MEDIUM", text
 }
 
 // extractCode extracts code from a markdown code block
