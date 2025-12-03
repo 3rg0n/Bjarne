@@ -85,6 +85,64 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 	return c.ValidateCodeWithProgress(ctx, code, filename, nil)
 }
 
+// ValidateCodeWithExamples runs validation including example-based tests
+func (c *ContainerRuntime) ValidateCodeWithExamples(ctx context.Context, code string, filename string, examples *ExampleTests, progress ProgressCallback) ([]ValidationResult, error) {
+	// If we have example tests, generate a test harness and add example validation
+	if examples != nil && len(examples.Tests) > 0 {
+		// First, validate the original code through normal pipeline
+		results, err := c.ValidateCodeWithProgress(ctx, code, filename, progress)
+		if err != nil {
+			return results, err
+		}
+
+		// Check if normal validation passed
+		allPassed := true
+		for _, r := range results {
+			if !r.Success {
+				allPassed = false
+				break
+			}
+		}
+		if !allPassed {
+			return results, nil // Fail fast on normal validation
+		}
+
+		// Generate test harness and run example tests
+		harness := GenerateTestHarness(code, examples)
+		harnessFilename := "test_harness.cpp"
+
+		// Create temp directory for harness
+		tmpDir, err := os.MkdirTemp("", "bjarne-examples-*")
+		if err != nil {
+			return results, fmt.Errorf("failed to create temp dir for examples: %w", err)
+		}
+		defer func() { _ = os.RemoveAll(tmpDir) }()
+
+		// Write harness
+		harnessPath := filepath.Join(tmpDir, harnessFilename)
+		if err := os.WriteFile(harnessPath, []byte(harness), 0600); err != nil {
+			return results, fmt.Errorf("failed to write harness: %w", err)
+		}
+
+		// Run example tests
+		if progress != nil {
+			progress("examples", true, nil)
+		}
+		result := c.runValidationStage(ctx, tmpDir, "examples",
+			"sh", "-c",
+			"clang++ -std=c++17 -o /tmp/test_harness /src/"+harnessFilename+" && /tmp/test_harness")
+		if progress != nil {
+			progress("examples", false, &result)
+		}
+		results = append(results, result)
+
+		return results, nil
+	}
+
+	// No examples - run normal validation
+	return c.ValidateCodeWithProgress(ctx, code, filename, progress)
+}
+
 // ValidateCodeWithProgress runs the full validation pipeline with progress callbacks
 func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code string, filename string, progress ProgressCallback) ([]ValidationResult, error) {
 	// Create temp directory for the code
@@ -122,7 +180,16 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 		return results, nil // Fail fast
 	}
 
-	// Stage 2: IWYU (Include What You Use) - check header hygiene
+	// Stage 2: cppcheck (deep static analysis - catches things clang-tidy misses)
+	result = runStage("cppcheck",
+		"cppcheck", "--enable=all", "--error-exitcode=1", "--suppress=missingIncludeSystem",
+		"--std=c++17", "/src/"+filename)
+	results = append(results, result)
+	if !result.Success {
+		return results, nil
+	}
+
+	// Stage 3: IWYU (Include What You Use) - check header hygiene
 	// IWYU always returns non-zero, so we check for actual suggestions in output
 	result = runStage("iwyu",
 		"sh", "-c",
@@ -131,7 +198,17 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 	result.Success = true
 	results = append(results, result)
 
-	// Stage 3: Compile with strict warnings
+	// Stage 4: Complexity metrics (lizard)
+	// Fail if cyclomatic complexity > 15 or function length > 100 lines
+	result = runStage("complexity",
+		"sh", "-c",
+		"lizard -C 15 -L 100 -w /src/"+filename)
+	results = append(results, result)
+	if !result.Success {
+		return results, nil
+	}
+
+	// Stage 5: Compile with strict warnings
 	result = runStage("compile",
 		"clang++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
 		"-fstack-protector-all", "-D_FORTIFY_SOURCE=2",
@@ -141,7 +218,7 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 		return results, nil
 	}
 
-	// Stage 3: ASAN (AddressSanitizer)
+	// Stage 6: ASAN (AddressSanitizer)
 	result = runStage("asan",
 		"sh", "-c",
 		"clang++ -std=c++17 -fsanitize=address -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
@@ -150,7 +227,7 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 		return results, nil
 	}
 
-	// Stage 4: UBSAN (UndefinedBehaviorSanitizer)
+	// Stage 7: UBSAN (UndefinedBehaviorSanitizer)
 	result = runStage("ubsan",
 		"sh", "-c",
 		"clang++ -std=c++17 -fsanitize=undefined -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
@@ -159,7 +236,7 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 		return results, nil
 	}
 
-	// Stage 5: Check if code uses threads, run TSAN if so
+	// Stage 8: Check if code uses threads, run TSAN if so
 	if codeUsesThreads(code) {
 		result = runStage("tsan",
 			"sh", "-c",
@@ -170,7 +247,7 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 		}
 	}
 
-	// Stage 6: Final run (clean execution)
+	// Stage 9: Final run (clean execution)
 	result = runStage("run",
 		"sh", "-c",
 		"clang++ -std=c++17 -O2 -o /tmp/test /src/"+filename+" && /tmp/test")
@@ -281,6 +358,14 @@ func formatStageError(stage, errorOutput string) string {
 		if len(diags) > 0 {
 			return FormatDiagnostics(diags)
 		}
+	case "cppcheck":
+		diags := ParseCppcheckOutput(errorOutput)
+		if len(diags) > 0 {
+			return FormatDiagnostics(diags)
+		}
+	case "complexity":
+		// Lizard output is already human-readable, just indent it
+		// No special parsing needed
 	case "asan":
 		diags := ParseSanitizerOutput(errorOutput, "asan")
 		if len(diags) > 0 {

@@ -19,6 +19,7 @@ const (
 	StateInput State = iota
 	StateThinking
 	StateAcknowledging
+	StateCollectingDoD // Waiting for Definition of Done from user
 	StateGenerating
 	StateValidating
 )
@@ -73,13 +74,17 @@ type Model struct {
 	styles   *Styles
 
 	// State
-	state        State
-	statusMsg    string
-	startTime    time.Time
-	tokenCount   int
-	currentCode  string
-	validated    bool
-	analyzed     bool // True after first analysis, subsequent inputs go to generation
+	state          State
+	statusMsg      string
+	startTime      time.Time
+	tokenCount     int
+	currentCode    string
+	validated      bool
+	analyzed       bool              // True after first analysis, subsequent inputs go to generation
+	originalPrompt string            // Store original prompt to parse examples
+	examples       *ExampleTests     // Parsed example tests from prompt
+	dod            *DefinitionOfDone // Definition of Done for complex tasks
+	difficulty     string            // EASY, MEDIUM, COMPLEX from reflection
 
 	// Session data
 	bedrock      *BedrockClient
@@ -109,6 +114,11 @@ type acknowledgeDoneMsg struct {
 	err    error
 }
 
+type dodDoneMsg struct {
+	result *GenerateResult
+	err    error
+}
+
 type validationDoneMsg struct {
 	results []ValidationResult
 	err     error
@@ -126,7 +136,7 @@ func NewModel(bedrock *BedrockClient, container *ContainerRuntime, cfg *Config) 
 	ta.SetWidth(78)
 	ta.SetHeight(1) // Single line, grows as needed
 	ta.ShowLineNumbers = false
-	ta.Prompt = "" // No prompt prefix (we draw our own >)
+	ta.Prompt = ""                                   // No prompt prefix (we draw our own >)
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle() // No highlight
 	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
 	ta.FocusedStyle.Prompt = lipgloss.NewStyle()
@@ -204,11 +214,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// First input - start analysis
 				return m.startThinking(input)
 			}
+
+			// Handle DoD collection
+			if m.state == StateCollectingDoD {
+				input := strings.TrimSpace(m.textarea.Value())
+				if input == "" {
+					return m, nil
+				}
+
+				m.textarea.Reset()
+				m.textarea.Blur()
+
+				// Parse user's Definition of Done
+				m.dod = ParseDefinitionOfDone(input)
+				m.conversation = append(m.conversation, Message{Role: "user", Content: input})
+
+				// Show what we parsed
+				m.addOutput("")
+				if m.dod.HasTestableRequirements() {
+					m.addOutput(m.styles.Success.Render("Testable requirements captured:"))
+					m.addOutput("  " + m.dod.FormatDoDSummary())
+
+					// Merge DoD examples with any from prompt
+					dodExamples := m.dod.ToExampleTests()
+					if dodExamples != nil {
+						if m.examples == nil {
+							m.examples = dodExamples
+						} else {
+							m.examples.Tests = append(m.examples.Tests, dodExamples.Tests...)
+						}
+					}
+				} else {
+					m.addOutput(m.styles.Warning.Render("No specific testable requirements found - will use standard validation"))
+				}
+				m.addOutput("")
+
+				// Now proceed to generation
+				m.conversation = append(m.conversation, Message{Role: "user", Content: GenerateNowPrompt})
+				return m.startGenerating()
+			}
 			return m, nil
 		}
 
-		// Handle input in input state
-		if m.state == StateInput {
+		// Handle input in input state or DoD collection
+		if m.state == StateInput || m.state == StateCollectingDoD {
 			var cmd tea.Cmd
 			m.textarea, cmd = m.textarea.Update(msg)
 			cmds = append(cmds, cmd)
@@ -265,14 +314,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.addOutput("")
 
+		// Store difficulty for later flow decisions
+		m.difficulty = difficulty
+
 		if difficulty == "EASY" {
-			// Skip confirmation for easy tasks
+			// Skip confirmation for easy tasks - generate immediately
 			m.conversation = append(m.conversation, Message{Role: "user", Content: GenerateNowPrompt})
 			return m.startGenerating()
 		}
 
-		// Return to input state so user can respond to questions
-		m.analyzed = true // Next input goes directly to generation
+		// For MEDIUM: user responds, then generate
+		// For COMPLEX: user responds to clarification, then we ask for DoD
+		m.analyzed = true // Next input goes to acknowledgment
 		m.state = StateInput
 		m.textarea.Focus()
 		return m, nil
@@ -294,9 +347,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.addOutput("")
 		m.addOutput(m.styles.Info.Render("bjarne: ") + stripMarkdown(msg.result.Text))
 
+		// For COMPLEX tasks, ask for Definition of Done before generating
+		if m.difficulty == "COMPLEX" && m.dod == nil {
+			return m.startCollectingDoD()
+		}
+
 		// Proceed to generation
 		m.conversation = append(m.conversation, Message{Role: "user", Content: GenerateNowPrompt})
 		return m.startGenerating()
+
+	case dodDoneMsg:
+		if msg.err != nil {
+			if m.ctx.Err() == context.Canceled {
+				return m, nil
+			}
+			m.addOutput(m.styles.Error.Render("Error: " + msg.err.Error()))
+			m.state = StateInput
+			m.textarea.Focus()
+			return m, nil
+		}
+		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
+		m.conversation = append(m.conversation, Message{Role: "assistant", Content: msg.result.Text})
+
+		// Show DoD questions
+		m.addOutput("")
+		m.drawBox("DEFINITION OF DONE", 56)
+		m.addOutput("")
+		m.addOutput(m.styles.Info.Render("bjarne: ") + stripMarkdown(msg.result.Text))
+		m.addOutput("")
+
+		// Wait for user to provide DoD
+		m.state = StateCollectingDoD
+		m.textarea.Focus()
+		return m, nil
 
 	case generatingDoneMsg:
 		if msg.err != nil {
@@ -374,6 +457,10 @@ func (m Model) View() string {
 		b.WriteString(m.styles.Prompt.Render(">") + " ")
 		b.WriteString(m.textarea.View())
 
+	case StateCollectingDoD:
+		b.WriteString(m.styles.Warning.Render("DoD>") + " ")
+		b.WriteString(m.textarea.View())
+
 	case StateThinking, StateAcknowledging, StateGenerating, StateValidating:
 		elapsed := time.Since(m.startTime).Seconds()
 		status := fmt.Sprintf("esc to interrupt · %.0fs", elapsed)
@@ -423,9 +510,20 @@ func (m *Model) startThinking(prompt string) (Model, tea.Cmd) {
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
+	// Store original prompt and parse example tests
+	m.originalPrompt = prompt
+	m.examples = ParseExampleTests(prompt)
+
 	// Show the request
 	m.addOutput("")
 	m.addOutput(m.styles.Info.Render("Request: ") + fmt.Sprintf("%q", prompt))
+
+	// If we found example tests, show them
+	if m.examples != nil && len(m.examples.Tests) > 0 {
+		m.addOutput("")
+		m.addOutput(m.styles.Success.Render(fmt.Sprintf("Found %d example test(s) - will validate against them", len(m.examples.Tests))))
+	}
+
 	m.addOutput("")
 	m.addOutput(m.styles.Info.Render("Analyzing prompt feasibility..."))
 
@@ -472,6 +570,30 @@ func (m *Model) doAcknowledging(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.bedrock.GenerateWithModel(ctx, m.config.ChatModel, AcknowledgeSystemPrompt, m.conversation, m.config.MaxTokens)
 		return acknowledgeDoneMsg{result: result, err: err}
+	}
+}
+
+func (m *Model) startCollectingDoD() (Model, tea.Cmd) {
+	m.state = StateAcknowledging // Reuse state for spinner display
+	m.statusMsg = "Preparing Definition of Done questions..."
+	m.startTime = time.Now()
+	m.tokenCount = 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.ctx = ctx
+	m.cancelFn = cancel
+
+	return *m, tea.Batch(
+		m.spinner.Tick,
+		m.doCollectingDoD(ctx),
+		tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
+	)
+}
+
+func (m *Model) doCollectingDoD(ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		result, err := m.bedrock.GenerateWithModel(ctx, m.config.ChatModel, DoDPrompt, m.conversation, m.config.MaxTokens)
+		return dodDoneMsg{result: result, err: err}
 	}
 }
 
@@ -524,7 +646,8 @@ func (m *Model) startValidation() (Model, tea.Cmd) {
 
 func (m *Model) doValidation(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
-		results, err := m.container.ValidateCode(ctx, m.currentCode, "code.cpp")
+		// Use example-based validation if we have examples
+		results, err := m.container.ValidateCodeWithExamples(ctx, m.currentCode, "code.cpp", m.examples, nil)
 		return validationDoneMsg{results: results, err: err}
 	}
 }
@@ -624,6 +747,10 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.currentCode = ""
 		m.validated = false
 		m.analyzed = false
+		m.originalPrompt = ""
+		m.examples = nil
+		m.dod = nil
+		m.difficulty = ""
 		m.tokenTracker.Reset()
 		m.addOutput("Conversation cleared.")
 

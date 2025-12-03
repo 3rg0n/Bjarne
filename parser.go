@@ -57,6 +57,75 @@ func ParseClangTidyOutput(output string) []Diagnostic {
 	return diagnostics
 }
 
+// ParseCppcheckOutput parses cppcheck output into structured diagnostics
+func ParseCppcheckOutput(output string) []Diagnostic {
+	var diagnostics []Diagnostic
+
+	// cppcheck patterns:
+	// [/src/code.cpp:10]: (error) Message text
+	// /src/code.cpp:10:5: error: Message text [errorId]
+	re := regexp.MustCompile(`(?m)^(?:\[)?([^:\]]+):(\d+)(?::(\d+))?(?:\])?: \((error|warning|style|performance|portability|information)\) (.+)$`)
+	re2 := regexp.MustCompile(`(?m)^([^:]+):(\d+):(\d+): (error|warning|note): (.+?) \[([^\]]+)\]$`)
+
+	// Try standard format first
+	matches := re.FindAllStringSubmatch(output, -1)
+	for _, match := range matches {
+		if len(match) >= 6 {
+			line := 0
+			col := 0
+			parseIntSafe(match[2], &line)
+			if len(match) >= 4 && match[3] != "" {
+				parseIntSafe(match[3], &col)
+			}
+
+			level := LevelWarning
+			if match[4] == "error" {
+				level = LevelError
+			}
+
+			diagnostics = append(diagnostics, Diagnostic{
+				File:    match[1],
+				Line:    line,
+				Column:  col,
+				Level:   level,
+				Message: match[5],
+				Check:   "cppcheck-" + match[4],
+			})
+		}
+	}
+
+	// Try GCC-style format
+	if len(diagnostics) == 0 {
+		matches = re2.FindAllStringSubmatch(output, -1)
+		for _, match := range matches {
+			if len(match) >= 7 {
+				line := 0
+				col := 0
+				parseIntSafe(match[2], &line)
+				parseIntSafe(match[3], &col)
+
+				level := LevelWarning
+				if match[4] == "error" {
+					level = LevelError
+				} else if match[4] == "note" {
+					level = LevelNote
+				}
+
+				diagnostics = append(diagnostics, Diagnostic{
+					File:    match[1],
+					Line:    line,
+					Column:  col,
+					Level:   level,
+					Message: match[5],
+					Check:   match[6],
+				})
+			}
+		}
+	}
+
+	return diagnostics
+}
+
 // ParseSanitizerOutput parses ASAN/UBSAN/TSAN output into structured diagnostics
 func ParseSanitizerOutput(output string, sanitizerType string) []Diagnostic {
 	var diagnostics []Diagnostic
