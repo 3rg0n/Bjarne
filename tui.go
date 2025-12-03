@@ -72,12 +72,13 @@ type Model struct {
 	styles   *Styles
 
 	// State
-	state       State
-	statusMsg   string
-	startTime   time.Time
-	tokenCount  int
-	currentCode string
-	validated   bool
+	state        State
+	statusMsg    string
+	startTime    time.Time
+	tokenCount   int
+	currentCode  string
+	validated    bool
+	analyzed     bool // True after first analysis, subsequent inputs go to generation
 
 	// Session data
 	bedrock      *BedrockClient
@@ -187,9 +188,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.handleCommand(input)
 				}
 
-				// Start thinking
 				m.textarea.Reset()
 				m.textarea.Blur()
+
+				// If already analyzed, user response goes to generation
+				if m.analyzed {
+					m.conversation = append(m.conversation, Message{Role: "user", Content: input})
+					return m.startGenerating()
+				}
+
+				// First input - start analysis
 				return m.startThinking(input)
 			}
 			return m, nil
@@ -260,6 +268,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Return to input state so user can respond to questions
+		m.analyzed = true // Next input goes directly to generation
 		m.state = StateInput
 		m.textarea.Focus()
 		return m, nil
@@ -310,6 +319,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if allPassed {
 			m.validated = true
+			m.analyzed = false // Reset for next prompt
 			m.showValidationSuccess(msg.results)
 		} else {
 			m.validated = false
@@ -570,6 +580,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.conversation = []Message{}
 		m.currentCode = ""
 		m.validated = false
+		m.analyzed = false
 		m.tokenTracker.Reset()
 		m.addOutput("Conversation cleared.")
 
