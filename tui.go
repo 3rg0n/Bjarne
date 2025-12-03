@@ -91,7 +91,6 @@ type Model struct {
 	// For async operations
 	ctx      context.Context
 	cancelFn context.CancelFunc
-	output   []string // Lines of output to display
 }
 
 // Messages for async operations
@@ -151,7 +150,6 @@ func NewModel(bedrock *BedrockClient, container *ContainerRuntime, cfg *Config) 
 		config:       cfg,
 		tokenTracker: NewTokenTracker(cfg.MaxTotalTokens, cfg.WarnTokenThreshold),
 		conversation: []Message{},
-		output:       []string{},
 		ctx:          context.Background(),
 	}
 }
@@ -370,13 +368,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	var b strings.Builder
 
-	// Show output history
-	for _, line := range m.output {
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-
-	// Show current state
+	// Only show current input/status line (output is printed directly to stdout)
 	switch m.state {
 	case StateInput:
 		b.WriteString(m.styles.Prompt.Render(">") + " ")
@@ -391,7 +383,6 @@ func (m Model) View() string {
 		b.WriteString(m.styles.Accent.Render(m.spinner.View()) + " ")
 		b.WriteString(m.statusMsg + " ")
 		b.WriteString(m.styles.Dim.Render("(" + status + ")"))
-
 	}
 
 	return b.String()
@@ -400,7 +391,8 @@ func (m Model) View() string {
 // Helper methods
 
 func (m *Model) addOutput(line string) {
-	m.output = append(m.output, line)
+	// Print directly to stdout for permanent history (scrollback)
+	fmt.Println(line)
 }
 
 // drawBox creates a bordered box with a title
@@ -726,6 +718,7 @@ func StartTUI() error {
 	fmt.Println()
 
 	m := NewModel(bedrock, container, cfg)
+	// Don't use WithAltScreen() - keeps normal terminal scrollback history
 	p := tea.NewProgram(m)
 
 	_, err = p.Run()
