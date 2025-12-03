@@ -45,7 +45,7 @@ func handleFirstRunPull(ctx context.Context, container *ContainerRuntime) error 
 	}
 
 	fmt.Println()
-	fmt.Println("\033[92m✓ Container ready!\033[0m")
+	fmt.Println("\033[92mContainer ready!\033[0m")
 	return nil
 }
 

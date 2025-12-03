@@ -66,14 +66,14 @@ func runValidateOnly(files []string) int {
 		// Read the file
 		content, err := os.ReadFile(filename)
 		if err != nil {
-			fmt.Printf("\033[91m✗ %s:\033[0m %v\n", filename, err)
+			fmt.Printf("\033[91mERROR %s:\033[0m %v\n", filename, err)
 			allPassed = false
 			continue
 		}
 
 		code := string(content)
 		if code == "" {
-			fmt.Printf("\033[91m✗ %s:\033[0m File is empty\n", filename)
+			fmt.Printf("\033[91mERROR %s:\033[0m File is empty\n", filename)
 			allPassed = false
 			continue
 		}
@@ -86,7 +86,7 @@ func runValidateOnly(files []string) int {
 		// Run validation pipeline
 		results, err := container.ValidateCode(ctx, code, baseName)
 		if err != nil {
-			fmt.Printf("\033[91m✗ %s:\033[0m %v\n", filename, err)
+			fmt.Printf("\033[91mERROR %s:\033[0m %v\n", filename, err)
 			allPassed = false
 			continue
 		}
@@ -104,15 +104,15 @@ func runValidateOnly(files []string) int {
 		}
 
 		if filePassed {
-			fmt.Printf("\033[92m✓ %s passed all validation!\033[0m\n", filename)
+			fmt.Printf("\033[92m%s passed all validation!\033[0m\n", filename)
 		}
 	}
 
 	if allPassed {
-		fmt.Printf("\n\033[92m✓ All files passed validation!\033[0m\n")
+		fmt.Printf("\n\033[92mAll files passed validation!\033[0m\n")
 		return 0
 	}
-	fmt.Printf("\n\033[91m✗ Some files failed validation.\033[0m\n")
+	fmt.Printf("\n\033[91mSome files failed validation.\033[0m\n")
 	return 1
 }
 
@@ -149,7 +149,7 @@ Examples:
   # Interactive mode
   $ bjarne
   > write a thread-safe counter in C++
-  bjarne: Generating... Validating... ✓
+  bjarne: Generating... Validating... done
   [validated code displayed]
   > /save counter.cpp
 

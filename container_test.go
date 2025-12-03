@@ -77,13 +77,13 @@ func TestFormatResults(t *testing.T) {
 	output := FormatResults(results)
 
 	// Check that output contains expected strings
-	if !contains(output, "✓ clang-tidy") {
+	if !contains(output, "PASS clang-tidy") {
 		t.Error("FormatResults missing clang-tidy success")
 	}
-	if !contains(output, "✓ compile") {
+	if !contains(output, "PASS compile") {
 		t.Error("FormatResults missing compile success")
 	}
-	if !contains(output, "✗ asan") {
+	if !contains(output, "FAIL asan") {
 		t.Error("FormatResults missing asan failure")
 	}
 	if !contains(output, "memory error") {

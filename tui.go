@@ -20,7 +20,6 @@ const (
 	StateThinking
 	StateGenerating
 	StateValidating
-	StateConfirm
 )
 
 // Box drawing characters for visual sections
@@ -113,21 +112,22 @@ type tickMsg time.Time
 
 // NewModel creates a new bubbletea model
 func NewModel(bedrock *BedrockClient, container *ContainerRuntime, cfg *Config) Model {
-	// Create textarea for input
+	// Create textarea for input - multi-line with dynamic height
 	ta := textarea.New()
 	ta.Placeholder = "What would you have me create?"
 	ta.Focus()
 	ta.CharLimit = 0 // No limit
 	ta.SetWidth(80)
-	ta.SetHeight(1)
+	ta.SetHeight(6) // Allow multi-line input
 	ta.ShowLineNumbers = false
-	ta.KeyMap.InsertNewline.SetEnabled(false) // Enter submits
+	// Shift+Enter for newlines, Enter to submit
+	ta.KeyMap.InsertNewline.SetKeys("shift+enter")
 
-	// Create spinner
+	// Create spinner - simple ASCII
 	s := spinner.New()
 	s.Spinner = spinner.Spinner{
-		Frames: []string{"✽", "✻", "✼", "✽", "✻", "✼"},
-		FPS:    time.Millisecond * 150,
+		Frames: []string{"|", "/", "-", "\\"},
+		FPS:    time.Millisecond * 100,
 	}
 
 	return Model{
@@ -166,7 +166,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cancelFn()
 				}
 				m.state = StateInput
-				m.addOutput(m.styles.Warning.Render("⚠ Interrupted"))
+				m.addOutput(m.styles.Warning.Render("-- Interrupted --"))
 				m.textarea.Focus()
 				return m, nil
 			}
@@ -187,10 +187,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textarea.Reset()
 				m.textarea.Blur()
 				return m.startThinking(input)
-			} else if m.state == StateConfirm {
-				// User confirmed, start generating
-				return m.startGenerating()
 			}
+			return m, nil
 		}
 
 		// Handle input in input state
@@ -211,7 +209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Already handled by Esc
 				return m, nil
 			}
-			m.addOutput(m.styles.Error.Render("✗ Analysis failed: " + msg.err.Error()))
+			m.addOutput(m.styles.Error.Render("Analysis failed: " + msg.err.Error()))
 			m.state = StateInput
 			m.textarea.Focus()
 			return m, nil
@@ -227,20 +225,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.drawBox("PROMPT FEASIBILITY ANALYSIS", 56)
 		m.addOutput("")
 
-		// Show difficulty with emoji
-		var diffIcon, diffColor string
+		var diffColor string
 		switch difficulty {
 		case "EASY":
-			diffIcon = "✅"
-			diffColor = m.styles.Success.Render("EASY - High success probability")
+			diffColor = m.styles.Success.Render("[EASY] High success probability")
 		case "MEDIUM":
-			diffIcon = "⚠️"
-			diffColor = m.styles.Warning.Render("MEDIUM - May require iteration")
+			diffColor = m.styles.Warning.Render("[MEDIUM] May require iteration")
 		case "COMPLEX":
-			diffIcon = "🔴"
-			diffColor = m.styles.Error.Render("COMPLEX - Multiple iterations likely")
+			diffColor = m.styles.Error.Render("[COMPLEX] Multiple iterations likely")
 		}
-		m.addOutput(fmt.Sprintf("Feasibility: %s %s", diffIcon, diffColor))
+		m.addOutput(fmt.Sprintf("Feasibility: %s", diffColor))
 		m.addOutput("")
 
 		// Display analysis with word wrapping
@@ -261,8 +255,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.startGenerating()
 		}
 
-		m.state = StateConfirm
-		m.addOutput(m.styles.Dim.Render("Press Enter to proceed, Esc to cancel"))
+		// Return to input state so user can respond to questions
+		m.state = StateInput
+		m.textarea.Focus()
 		return m, nil
 
 	case generatingDoneMsg:
@@ -270,7 +265,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ctx.Err() == context.Canceled {
 				return m, nil
 			}
-			m.addOutput(m.styles.Error.Render("✗ Generation failed: " + msg.err.Error()))
+			m.addOutput(m.styles.Error.Render("Generation failed: " + msg.err.Error()))
 			m.state = StateInput
 			m.textarea.Focus()
 			return m, nil
@@ -295,7 +290,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ctx.Err() == context.Canceled {
 				return m, nil
 			}
-			m.addOutput(m.styles.Error.Render("✗ Validation error: " + msg.err.Error()))
+			m.addOutput(m.styles.Error.Render("Validation error: " + msg.err.Error()))
 			m.state = StateInput
 			m.textarea.Focus()
 			return m, nil
@@ -356,8 +351,6 @@ func (m Model) View() string {
 		b.WriteString(m.statusMsg + " ")
 		b.WriteString(m.styles.Dim.Render("(" + status + ")"))
 
-	case StateConfirm:
-		b.WriteString(m.styles.Prompt.Render(">") + " ")
 	}
 
 	return b.String()
@@ -401,7 +394,7 @@ func (m *Model) startThinking(prompt string) (Model, tea.Cmd) {
 	m.addOutput("")
 	m.addOutput(m.styles.Info.Render("Request: ") + fmt.Sprintf("%q", prompt))
 	m.addOutput("")
-	m.addOutput(m.styles.Info.Render("🔍 Analyzing prompt feasibility..."))
+	m.addOutput(m.styles.Info.Render("Analyzing prompt feasibility..."))
 
 	// Add user message
 	m.conversation = append(m.conversation, Message{Role: "user", Content: prompt})
@@ -432,7 +425,7 @@ func (m *Model) startGenerating() (Model, tea.Cmd) {
 	m.tokenCount = 0
 
 	m.addOutput("")
-	m.addOutput(m.styles.Info.Render("🔨 Starting code generation..."))
+	m.addOutput(m.styles.Info.Render("Starting code generation..."))
 	m.addOutput(fmt.Sprintf("   Model: %s", m.styles.Accent.Render(shortModelName(m.config.GenerateModel))))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -459,7 +452,7 @@ func (m *Model) startValidation() (Model, tea.Cmd) {
 	m.startTime = time.Now()
 
 	m.addOutput("")
-	m.addOutput(m.styles.Info.Render("🔍 Validating code..."))
+	m.addOutput(m.styles.Info.Render("Validating code..."))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx = ctx
@@ -489,16 +482,16 @@ func (m *Model) showValidationSuccess(results []ValidationResult) {
 			prefix = treeEnd
 		}
 		m.addOutput(fmt.Sprintf("  %s Gate %d: %s...", prefix, i+1, r.Stage))
-		m.addOutput(fmt.Sprintf("  %s  %s %s", treeVert, m.styles.Success.Render("✓ Passed"), m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
+		m.addOutput(fmt.Sprintf("  %s  %s %s", treeVert, m.styles.Success.Render("PASS"), m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
 	}
 
 	m.addOutput("")
-	m.addOutput(fmt.Sprintf("  %s All validation gates passed", m.styles.Success.Render("✓")))
+	m.addOutput(fmt.Sprintf("  %s All validation gates passed", m.styles.Success.Render(">>")))
 	m.addOutput("")
 
 	// Success box with code
 	m.addOutput(strings.Repeat("=", 80))
-	m.addOutput(m.styles.Success.Render("✅ SUCCESS! Validated code:"))
+	m.addOutput(m.styles.Success.Render("SUCCESS! Validated code:"))
 	m.addOutput(strings.Repeat("=", 80))
 	m.addOutput("```cpp")
 	m.addOutput(m.currentCode)
@@ -518,9 +511,9 @@ func (m *Model) showValidationFailure(results []ValidationResult) {
 		}
 		m.addOutput(fmt.Sprintf("  %s Gate %d: %s...", prefix, i+1, r.Stage))
 		if r.Success {
-			m.addOutput(fmt.Sprintf("  %s  %s %s", treeVert, m.styles.Success.Render("✓ Passed"), m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
+			m.addOutput(fmt.Sprintf("  %s  %s %s", treeVert, m.styles.Success.Render("PASS"), m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
 		} else {
-			m.addOutput(fmt.Sprintf("  %s  %s %s", treeVert, m.styles.Error.Render("✗ Failed"), m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
+			m.addOutput(fmt.Sprintf("  %s  %s %s", treeVert, m.styles.Error.Render("FAIL"), m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
 			// Show error details
 			if r.Error != "" {
 				errLines := strings.Split(r.Error, "\n")
@@ -539,7 +532,7 @@ func (m *Model) showValidationFailure(results []ValidationResult) {
 
 	m.addOutput("")
 	m.addOutput(strings.Repeat("=", 80))
-	m.addOutput(m.styles.Error.Render("❌ FAILED! Validation did not pass."))
+	m.addOutput(m.styles.Error.Render("FAILED! Validation did not pass."))
 	m.addOutput(strings.Repeat("=", 80))
 	m.addOutput("")
 	m.addOutput(m.styles.Warning.Render("Generated code (failed validation):"))
@@ -597,7 +590,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 			if err := saveToFile(filename, m.currentCode); err != nil {
 				m.addOutput(m.styles.Error.Render("Error saving: " + err.Error()))
 			} else {
-				m.addOutput(m.styles.Success.Render("✓ Saved to " + filename))
+				m.addOutput(m.styles.Success.Render("Saved to " + filename))
 			}
 		}
 
@@ -645,7 +638,7 @@ func StartTUI() error {
 			fmt.Println("         Code generation will work, but validation will be skipped.")
 		}
 	} else {
-		fmt.Printf("Validation container: %s ✓\n", container.imageName)
+		fmt.Printf("Validation container: %s [OK]\n", container.imageName)
 	}
 	fmt.Println()
 

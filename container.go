@@ -252,10 +252,10 @@ func FormatResults(results []ValidationResult) string {
 	allPassed := true
 	for _, r := range results {
 		if r.Success {
-			sb.WriteString(fmt.Sprintf("✓ %s (%.2fs)\n", r.Stage, r.Duration.Seconds()))
+			sb.WriteString(fmt.Sprintf("PASS %s (%.2fs)\n", r.Stage, r.Duration.Seconds()))
 		} else {
 			allPassed = false
-			sb.WriteString(fmt.Sprintf("✗ %s (%.2fs)\n", r.Stage, r.Duration.Seconds()))
+			sb.WriteString(fmt.Sprintf("FAIL %s (%.2fs)\n", r.Stage, r.Duration.Seconds()))
 			if r.Error != "" {
 				// Parse and format diagnostics based on stage type
 				formatted := formatStageError(r.Stage, r.Error)
@@ -265,7 +265,7 @@ func FormatResults(results []ValidationResult) string {
 	}
 
 	if allPassed {
-		sb.WriteString("\n✓ All validation stages passed!\n")
+		sb.WriteString("\nAll validation stages passed!\n")
 	}
 
 	return sb.String()

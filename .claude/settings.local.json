@@ -10,7 +10,8 @@
       "WebFetch(domain:www.azquotes.com)",
       "Bash(podman run:*)",
       "Bash(MSYS_NO_PATHCONV=1 podman run:*)",
-      "Bash(go get:*)"
+      "Bash(go get:*)",
+      "Bash(go run -exec '' .)"
     ],
     "deny": [],
     "ask": []
