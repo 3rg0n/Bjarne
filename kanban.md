@@ -28,6 +28,8 @@ _Last updated: 2025-12-03_
 | T-019 | Error handling and user-friendly messages | 2025-12-03 |
 | T-022 | GitHub Actions for cross-platform binaries | 2025-12-03 |
 | T-023 | GitHub Actions for container image | 2025-12-03 |
+| T-025 | Write installation documentation | 2025-12-03 |
+| T-028 | Validate-only mode (--validate flag and /validate command) | 2025-12-03 |
 
 ---
 
@@ -63,22 +65,22 @@ All core workflow tasks completed (T-013, T-015, T-016 were implemented as part 
 | T-020 | Colored terminal output | T-005 | ✓ Done (throughout) |
 | T-021 | Add `/` command menu | T-005 | ✓ Done (T-005) |
 
-### Phase 5: Distribution — MOSTLY COMPLETE
+### Phase 5: Distribution — COMPLETE
 
 | ID | Task | Dependencies | Status |
 |----|------|--------------|--------|
 | T-022 | GitHub Actions: Build cross-platform binaries | T-018 | ✓ Done |
 | T-023 | GitHub Actions: Build and push container to ghcr.io | T-008 | ✓ Done |
 | T-024 | Create GitHub Release workflow (on tag) | T-022, T-023 | ✓ Done (in release.yml) |
-| T-025 | Write installation documentation | T-024 | Pending |
+| T-025 | Write installation documentation | T-024 | ✓ Done |
 
 ### Phase 6: Polish (Low Priority)
 
-| ID | Task | Dependencies |
-|----|------|--------------|
-| T-026 | Add iteration limits / token budget | T-014 |
-| T-027 | Model selection via env vars or flags | T-006 |
-| T-028 | Validate-only mode (existing code) | T-010 |
+| ID | Task | Dependencies | Status |
+|----|------|--------------|--------|
+| T-026 | Add iteration limits / token budget | T-014 | Pending |
+| T-027 | Model selection via env vars or flags | T-006 | ✓ Done (env vars work) |
+| T-028 | Validate-only mode (existing code) | T-010 | ✓ Done |
 
 ---
 
@@ -155,11 +157,16 @@ All core workflow tasks completed (T-013, T-015, T-016 were implemented as part 
 - [x] Colored terminal output (implemented throughout)
 - [x] /command menu (implemented with T-005)
 
-**Phase 5: Distribution** — MOSTLY COMPLETE
+**Phase 5: Distribution** — COMPLETE
 - [x] GitHub Actions for CI (ci.yml)
 - [x] GitHub Actions for cross-platform binaries (release.yml)
 - [x] GitHub Actions for container image (container.yml)
-- [ ] Installation documentation (T-025)
+- [x] Installation documentation (T-025)
+
+**Phase 6: Polish** — MOSTLY COMPLETE
+- [ ] Iteration limits / token budget (T-026)
+- [x] Model selection via env vars (BJARNE_MODEL)
+- [x] Validate-only mode (T-028)
 
 ---
 
