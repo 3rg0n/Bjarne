@@ -18,6 +18,46 @@ type Session struct {
 	lastValidated bool
 }
 
+// handleFirstRunPull handles the first-run container pull experience
+func handleFirstRunPull(ctx context.Context, container *ContainerRuntime) error {
+	fmt.Println()
+	fmt.Println("\033[93m┌─────────────────────────────────────────────────────────────┐\033[0m")
+	fmt.Println("\033[93m│                    First-time Setup                          │\033[0m")
+	fmt.Println("\033[93m└─────────────────────────────────────────────────────────────┘\033[0m")
+	fmt.Println()
+	fmt.Println("bjarne requires a validation container to check your C/C++ code")
+	fmt.Println("for memory errors, undefined behavior, and data races.")
+	fmt.Println()
+	fmt.Printf("Container image: \033[96m%s\033[0m\n", container.imageName)
+	fmt.Printf("Size: ~500MB (Wolfi-based, minimal attack surface)\n")
+	fmt.Println()
+	fmt.Print("Pull the validation container now? [Y/n] ")
+
+	reader := bufio.NewReader(os.Stdin)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	response = strings.TrimSpace(strings.ToLower(response))
+	if response != "" && response != "y" && response != "yes" {
+		return fmt.Errorf("container pull declined")
+	}
+
+	fmt.Println()
+	fmt.Println("\033[93mPulling container image...\033[0m")
+	fmt.Println("(This may take a few minutes on first run)")
+	fmt.Println()
+
+	if err := container.PullImage(ctx); err != nil {
+		return fmt.Errorf("failed to pull container: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println("\033[92m✓ Container ready!\033[0m")
+	return nil
+}
+
 // Run starts the interactive REPL loop
 func Run() error {
 	ctx := context.Background()
@@ -36,13 +76,13 @@ func Run() error {
 
 	// Check if validation image exists
 	if !container.ImageExists(ctx) {
-		fmt.Printf("Validation container not found. Pull %s? [Y/n] ", container.imageName)
-		// For now, auto-pull (can make interactive later)
-		fmt.Println("Pulling...")
-		if err := container.PullImage(ctx); err != nil {
-			fmt.Printf("\033[93mWarning:\033[0m Could not pull image: %v\n", err)
-			fmt.Println("         Validation will be skipped until container is available.")
+		if err := handleFirstRunPull(ctx, container); err != nil {
+			fmt.Printf("\033[93mWarning:\033[0m %v\n", err)
+			fmt.Println("         Code generation will work, but validation will be skipped.")
+			fmt.Println("         Run bjarne again after installing the container image.")
 		}
+	} else {
+		fmt.Printf("Validation container: %s ✓\n", container.imageName)
 	}
 	fmt.Println()
 
