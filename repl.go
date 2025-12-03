@@ -283,9 +283,10 @@ func printCommandHelp() {
 	fmt.Println("")
 }
 
-// handlePrompt processes a code generation request with automatic iteration and model escalation
+// handlePrompt processes a code generation request with reflection and automatic iteration
 func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
-	fmt.Printf("%s Generating with %s...\n", s.theme.Info("bjarne:"), shortModelName(s.config.GenerateModel))
+	// Phase 1: Reflection - bjarne thinks about the request
+	fmt.Printf("\n%s\n", s.theme.Info("bjarne is thinking..."))
 
 	// Add user message to conversation
 	s.conversation = append(s.conversation, Message{
@@ -293,15 +294,66 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		Content: prompt,
 	})
 
-	// Call Bedrock with initial model
+	// Call with reflection prompt using chat model
+	reflectResult, err := s.bedrock.GenerateWithModel(ctx, s.config.ChatModel, ReflectionSystemPrompt, s.conversation, s.config.MaxTokens)
+	if err != nil {
+		return fmt.Errorf("reflection failed: %w", err)
+	}
+
+	// Track tokens
+	ok, tokenMsg := s.tokenTracker.Add(reflectResult.InputTokens, reflectResult.OutputTokens)
+	if tokenMsg != "" {
+		fmt.Printf("%s\n", s.theme.Warning(tokenMsg))
+	}
+	if !ok {
+		return fmt.Errorf("token budget exceeded")
+	}
+
+	// Add reflection response to conversation
+	s.conversation = append(s.conversation, Message{
+		Role:    "assistant",
+		Content: reflectResult.Text,
+	})
+
+	// Display bjarne's reflection
+	fmt.Printf("\n%s %s\n\n", s.theme.Accent("bjarne:"), reflectResult.Text)
+
+	// Wait for user confirmation
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print(s.theme.PromptCode() + ">" + s.theme.Reset() + " ")
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+	response = strings.TrimSpace(strings.ToLower(response))
+
+	// Check for abort
+	if response == "n" || response == "no" || response == "abort" || response == "cancel" {
+		fmt.Println("Cancelled.")
+		return nil
+	}
+
+	// Add user confirmation to conversation
+	userConfirm := response
+	if userConfirm == "" || userConfirm == "y" || userConfirm == "yes" {
+		userConfirm = "Yes, proceed."
+	}
+	s.conversation = append(s.conversation, Message{
+		Role:    "user",
+		Content: userConfirm + "\n\n" + GenerateNowPrompt,
+	})
+
+	// Phase 2: Generation
+	fmt.Printf("\n%s Generating with %s...\n", s.theme.Info("bjarne:"), shortModelName(s.config.GenerateModel))
+
 	currentModel := s.config.GenerateModel
-	result, err := s.bedrock.GenerateWithModel(ctx, currentModel, SystemPrompt, s.conversation, s.config.MaxTokens)
+	result, err := s.bedrock.GenerateWithModel(ctx, currentModel, GenerationSystemPrompt, s.conversation, s.config.MaxTokens)
 	if err != nil {
 		return fmt.Errorf("generation failed: %w", err)
 	}
 
 	// Track tokens
-	ok, tokenMsg := s.tokenTracker.Add(result.InputTokens, result.OutputTokens)
+	ok, tokenMsg = s.tokenTracker.Add(result.InputTokens, result.OutputTokens)
 	if tokenMsg != "" {
 		fmt.Printf("%s\n", s.theme.Warning(tokenMsg))
 	}
@@ -393,7 +445,7 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		})
 
 		// Call Bedrock for fix with potentially escalated model
-		iterResult, err := s.bedrock.GenerateWithModel(ctx, fixModel, SystemPrompt, s.conversation, s.config.MaxTokens)
+		iterResult, err := s.bedrock.GenerateWithModel(ctx, fixModel, GenerationSystemPrompt, s.conversation, s.config.MaxTokens)
 		if err != nil {
 			return fmt.Errorf("iteration failed: %w", err)
 		}
