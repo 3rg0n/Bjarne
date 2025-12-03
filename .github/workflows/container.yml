@@ -1,0 +1,118 @@
+name: Container
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'docker/**'
+  pull_request:
+    branches: [master, main]
+    paths:
+      - 'docker/**'
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}-validator
+
+jobs:
+  build:
+    name: Build container
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Build and push (Wolfi)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./docker
+          file: ./docker/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Ubuntu fallback
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./docker
+          file: ./docker/Dockerfile.ubuntu
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ubuntu
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  test:
+    name: Test container
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name != 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pull container
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Test clang-tidy
+        run: |
+          echo '#include <iostream>
+          int main() { std::cout << "Hello"; return 0; }' > /tmp/test.cpp
+          docker run --rm -v /tmp:/src:ro \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            clang-tidy /src/test.cpp -- -std=c++17
+
+      - name: Test compilation
+        run: |
+          docker run --rm -v /tmp:/src:ro \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            clang++ -std=c++17 -Wall -Wextra -o /tmp/test /src/test.cpp
+
+      - name: Test ASAN build
+        run: |
+          docker run --rm -v /tmp:/src:ro --tmpfs /tmp:rw \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            sh -c "clang++ -std=c++17 -fsanitize=address -o /tmp/test /src/test.cpp && /tmp/test"
+
+      - name: Test UBSAN build
+        run: |
+          docker run --rm -v /tmp:/src:ro --tmpfs /tmp:rw \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            sh -c "clang++ -std=c++17 -fsanitize=undefined -o /tmp/test /src/test.cpp && /tmp/test"
