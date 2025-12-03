@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    name: Build binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin-arm64
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o bjarne-${{ matrix.suffix }} .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bjarne-${{ matrix.suffix }}
+          path: bjarne-${{ matrix.suffix }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create checksums
+        run: |
+          cd artifacts
+          for dir in */; do
+            for file in "$dir"*; do
+              sha256sum "$file" >> checksums.txt
+            done
+          done
+          cat checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: bjarne ${{ steps.version.outputs.version }}
+          body: |
+            ## bjarne ${{ steps.version.outputs.version }}
+
+            AI-assisted C/C++ code generation with mandatory validation.
+
+            ### Installation
+
+            Download the binary for your platform:
+            - **Linux (x64)**: `bjarne-linux-amd64`
+            - **Linux (ARM64)**: `bjarne-linux-arm64`
+            - **macOS (Intel)**: `bjarne-darwin-amd64`
+            - **macOS (Apple Silicon)**: `bjarne-darwin-arm64`
+            - **Windows (x64)**: `bjarne-windows-amd64.exe`
+
+            Make the binary executable (Linux/macOS):
+            ```bash
+            chmod +x bjarne-*
+            ```
+
+            ### Requirements
+            - AWS credentials configured (`aws configure` or environment variables)
+            - Docker or Podman for validation container
+
+            ### Quick Start
+            ```bash
+            ./bjarne
+            ```
+
+            On first run, bjarne will prompt to download the validation container.
+          files: |
+            artifacts/bjarne-linux-amd64/*
+            artifacts/bjarne-linux-arm64/*
+            artifacts/bjarne-darwin-amd64/*
+            artifacts/bjarne-darwin-arm64/*
+            artifacts/bjarne-windows-amd64.exe/*
+            artifacts/checksums.txt
+          draft: false
+          prerelease: false
