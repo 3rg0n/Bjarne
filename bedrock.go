@@ -51,7 +51,7 @@ func NewBedrockClient(ctx context.Context) (*BedrockClient, error) {
 		config.WithRegion(getEnvOrDefault("AWS_REGION", "us-east-1")),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+		return nil, ErrAWSConfig(err)
 	}
 
 	// Get model ID from environment or use default
@@ -86,7 +86,7 @@ func (b *BedrockClient) Generate(ctx context.Context, systemPrompt string, messa
 		ContentType: aws.String("application/json"),
 	})
 	if err != nil {
-		return "", fmt.Errorf("bedrock invoke failed: %w", err)
+		return "", ErrBedrockInvoke(err)
 	}
 
 	var response ClaudeResponse

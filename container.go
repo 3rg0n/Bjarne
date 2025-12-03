@@ -36,7 +36,7 @@ func DetectContainerRuntime() (*ContainerRuntime, error) {
 		}, nil
 	}
 
-	return nil, fmt.Errorf("no container runtime found: install podman or docker")
+	return nil, ErrNoContainerRuntime()
 }
 
 // getImageName returns the container image to use

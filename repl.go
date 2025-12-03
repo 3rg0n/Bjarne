@@ -70,7 +70,8 @@ func Run() error {
 	fmt.Println("Detecting container runtime...")
 	container, err := DetectContainerRuntime()
 	if err != nil {
-		return fmt.Errorf("failed to detect container runtime: %w", err)
+		fmt.Print(FormatUserError(err))
+		return err
 	}
 	fmt.Printf("Using container runtime: %s\n", container.GetBinary())
 
@@ -90,7 +91,8 @@ func Run() error {
 	fmt.Println("Connecting to AWS Bedrock...")
 	bedrock, err := NewBedrockClient(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to initialize Bedrock client: %w", err)
+		fmt.Print(FormatUserError(err))
+		return err
 	}
 	fmt.Printf("Using model: %s\n", bedrock.GetModelID())
 	fmt.Println()
