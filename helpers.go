@@ -97,6 +97,62 @@ func saveToFile(filename, code string) error {
 	return os.WriteFile(filename, []byte(code), 0600)
 }
 
+// stripMarkdown removes common markdown formatting from text for terminal display
+func stripMarkdown(text string) string {
+	// Remove bold (**text** or __text__)
+	re := regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	text = re.ReplaceAllString(text, "$1")
+	re = regexp.MustCompile(`__([^_]+)__`)
+	text = re.ReplaceAllString(text, "$1")
+
+	// Remove italic (*text* or _text_) - be careful not to match bullet points
+	re = regexp.MustCompile(`(?:^|[^*])\*([^*\n]+)\*(?:[^*]|$)`)
+	text = re.ReplaceAllString(text, "$1")
+
+	// Remove inline code (`text`)
+	re = regexp.MustCompile("`([^`]+)`")
+	text = re.ReplaceAllString(text, "$1")
+
+	return text
+}
+
+// wrapText wraps text to a specified width, preserving paragraph breaks
+func wrapText(text string, width int) []string {
+	var result []string
+	paragraphs := strings.Split(text, "\n")
+
+	for _, para := range paragraphs {
+		para = strings.TrimSpace(para)
+		if para == "" {
+			result = append(result, "")
+			continue
+		}
+
+		// Wrap this paragraph
+		words := strings.Fields(para)
+		if len(words) == 0 {
+			continue
+		}
+
+		var line string
+		for _, word := range words {
+			if line == "" {
+				line = word
+			} else if len(line)+1+len(word) <= width {
+				line += " " + word
+			} else {
+				result = append(result, line)
+				line = word
+			}
+		}
+		if line != "" {
+			result = append(result, line)
+		}
+	}
+
+	return result
+}
+
 // shortModelName extracts a readable model name from the full ID
 func shortModelName(modelID string) string {
 	// global.anthropic.claude-haiku-4-5-20251001-v1:0 -> claude-haiku-4-5

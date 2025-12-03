@@ -242,7 +242,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.addOutput(fmt.Sprintf("Feasibility: %s %s", diffIcon, diffColor))
 		m.addOutput("")
-		m.addOutput(m.styles.Dim.Render("Analysis: ") + reflection)
+
+		// Display analysis with word wrapping
+		cleanText := stripMarkdown(reflection)
+		lines := wrapText(cleanText, 76)
+		for i, line := range lines {
+			if i == 0 {
+				m.addOutput(m.styles.Dim.Render("Analysis: ") + line)
+			} else {
+				m.addOutput("          " + line) // Indent continuation lines
+			}
+		}
 		m.addOutput("")
 
 		if difficulty == "EASY" {
@@ -271,7 +281,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		code := extractCode(msg.result.Text)
 		if code == "" {
 			m.addOutput("")
-			m.addOutput(m.styles.Info.Render("bjarne: ") + msg.result.Text)
+			m.addOutput(m.styles.Info.Render("bjarne: ") + stripMarkdown(msg.result.Text))
 			m.state = StateInput
 			m.textarea.Focus()
 			return m, nil
