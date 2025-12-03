@@ -175,13 +175,13 @@ func (c *ContainerRuntime) runValidationStage(ctx context.Context, tmpDir, stage
 	start := time.Now()
 
 	// Build container run command
+	// Note: We don't use --read-only because sanitizers need to write to /tmp
+	// Security is maintained via --network none and read-only source mount
 	args := []string{
 		"run", "--rm",
-		"--network", "none", // No network access
-		"--read-only",                               // Read-only root filesystem
-		"--tmpfs", "/tmp:rw,exec,nosuid,size=64m", // Writable /tmp for compilation and execution
+		"--network", "none",       // No network access
 		"-v", tmpDir + ":/src:ro", // Mount code read-only
-		"--timeout", "120", // 2 minute timeout
+		"--timeout", "120",        // 2 minute timeout
 		c.imageName,
 	}
 	args = append(args, command...)

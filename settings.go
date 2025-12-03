@@ -293,6 +293,11 @@ func (t *Theme) Reset() string {
 	return colorCodes["reset"]
 }
 
+// Dim formats text with dim/faint styling
+func (t *Theme) Dim(text string) string {
+	return "\033[2m" + text + colorCodes["reset"]
+}
+
 func (t *Theme) colorize(color, text string) string {
 	code := getColorCode(color)
 	return code + text + colorCodes["reset"]

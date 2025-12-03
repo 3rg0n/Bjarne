@@ -80,6 +80,126 @@ func (s *Spinner) Stop() {
 	fmt.Printf("\r\033[K")
 }
 
+// ThinkingSpinner displays an animated thinking indicator like Claude Code
+// Example: ✽ Thinking… (esc to interrupt · 12s · ↓ 1.2k tokens)
+type ThinkingSpinner struct {
+	message   string
+	frames    []string
+	interval  time.Duration
+	stop      chan struct{}
+	done      chan struct{}
+	mu        sync.Mutex
+	theme     *Theme
+	startTime time.Time
+	tokens    int
+}
+
+// NewThinkingSpinner creates a new thinking spinner
+func NewThinkingSpinner(message string, theme *Theme) *ThinkingSpinner {
+	return &ThinkingSpinner{
+		message:   message,
+		frames:    []string{"✽", "✻", "✼", "✽", "✻", "✼"},
+		interval:  150 * time.Millisecond,
+		stop:      make(chan struct{}),
+		done:      make(chan struct{}),
+		theme:     theme,
+		startTime: time.Now(),
+		tokens:    0,
+	}
+}
+
+// Start begins the thinking animation
+func (t *ThinkingSpinner) Start() {
+	t.startTime = time.Now()
+	go func() {
+		defer close(t.done)
+		i := 0
+		for {
+			select {
+			case <-t.stop:
+				return
+			default:
+				t.mu.Lock()
+				elapsed := time.Since(t.startTime)
+				line := t.formatLine(t.frames[i], elapsed)
+				fmt.Printf("\r\033[K%s", line)
+				t.mu.Unlock()
+				i = (i + 1) % len(t.frames)
+				time.Sleep(t.interval)
+			}
+		}
+	}()
+}
+
+// formatLine formats the thinking indicator line
+func (t *ThinkingSpinner) formatLine(frame string, elapsed time.Duration) string {
+	// Format elapsed time
+	secs := int(elapsed.Seconds())
+
+	// Build the status parts
+	parts := []string{fmt.Sprintf("%ds", secs)}
+
+	if t.tokens > 0 {
+		parts = append(parts, fmt.Sprintf("↓ %s tokens", formatTokenCount(t.tokens)))
+	}
+
+	status := t.theme.Dim("(" + joinParts(parts) + ")")
+
+	return fmt.Sprintf("%s %s %s", t.theme.Accent(frame), t.message, status)
+}
+
+// UpdateTokens updates the token count display
+func (t *ThinkingSpinner) UpdateTokens(tokens int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.tokens = tokens
+}
+
+// Success stops with a success indicator
+func (t *ThinkingSpinner) Success(message string) {
+	close(t.stop)
+	<-t.done
+	elapsed := time.Since(t.startTime)
+	fmt.Printf("\r\033[K%s %s %s\n",
+		t.theme.Success("✓"),
+		message,
+		t.theme.Dim(fmt.Sprintf("(%.1fs)", elapsed.Seconds())))
+}
+
+// Fail stops with a failure indicator
+func (t *ThinkingSpinner) Fail(message string) {
+	close(t.stop)
+	<-t.done
+	fmt.Printf("\r\033[K%s %s\n", t.theme.Error("✗"), message)
+}
+
+// Stop stops the spinner without a message
+func (t *ThinkingSpinner) Stop() {
+	close(t.stop)
+	<-t.done
+	fmt.Printf("\r\033[K")
+}
+
+// formatTokenCount formats token count with k suffix for thousands
+func formatTokenCount(tokens int) string {
+	if tokens >= 1000 {
+		return fmt.Sprintf("%.1fk", float64(tokens)/1000)
+	}
+	return fmt.Sprintf("%d", tokens)
+}
+
+// joinParts joins string parts with " · "
+func joinParts(parts []string) string {
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += " · "
+		}
+		result += p
+	}
+	return result
+}
+
 // ValidationSpinner manages spinners for the validation pipeline
 type ValidationSpinner struct {
 	theme   *Theme

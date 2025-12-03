@@ -118,21 +118,36 @@ func Run() error {
 		conversation: []Message{},
 	}
 
-	scanner := bufio.NewScanner(os.Stdin)
+	inputReader := NewInputReader(cfg.Theme)
+	defer inputReader.Close()
 
 	for {
 		fmt.Print(session.theme.PromptCode() + ">" + session.theme.Reset() + " ")
 
-		if !scanner.Scan() {
+		fullInput, displayText, err := inputReader.ReadInput()
+		if err != nil {
 			break
 		}
 
-		input := strings.TrimSpace(scanner.Text())
+		input := strings.TrimSpace(fullInput)
 		if input == "" {
 			continue
 		}
 
-		// Handle slash commands
+		// If this was a multi-line paste, show the collapsed indicator
+		lines := strings.Split(input, "\n")
+		if len(lines) > 1 {
+			// Move up to overwrite the raw pasted lines and show collapsed version
+			// Clear previous lines and show collapsed indicator
+			for i := 0; i < len(lines); i++ {
+				fmt.Print("\033[A\033[K") // Move up and clear line
+			}
+			fmt.Printf("%s%s%s %s\n",
+				session.theme.PromptCode(), ">", session.theme.Reset(),
+				displayText)
+		}
+
+		// Handle slash commands (only first line for commands)
 		if strings.HasPrefix(input, "/") {
 			if !session.handleCommand(ctx, input) {
 				break
@@ -142,12 +157,8 @@ func Run() error {
 
 		// Handle code generation request
 		if err := session.handlePrompt(ctx, input); err != nil {
-			fmt.Fprintf(os.Stderr, "\033[91mError:\033[0m %v\n", err)
+			fmt.Fprintf(os.Stderr, "\n%s %v\n", session.theme.Error("Error:"), err)
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("input error: %w", err)
 	}
 
 	fmt.Println("\nGoodbye!")
@@ -285,8 +296,12 @@ func printCommandHelp() {
 
 // handlePrompt processes a code generation request with reflection and automatic iteration
 func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
+	// Visual spacing after user input
+	fmt.Println()
+
 	// Phase 1: Reflection - bjarne thinks about the request
-	fmt.Printf("\n%s\n", s.theme.Info("bjarne is thinking..."))
+	thinkSpinner := NewThinkingSpinner("Thinking…", s.theme)
+	thinkSpinner.Start()
 
 	// Add user message to conversation
 	s.conversation = append(s.conversation, Message{
@@ -297,8 +312,13 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 	// Call with reflection prompt using chat model
 	reflectResult, err := s.bedrock.GenerateWithModel(ctx, s.config.ChatModel, ReflectionSystemPrompt, s.conversation, s.config.MaxTokens)
 	if err != nil {
+		thinkSpinner.Fail("Reflection failed")
 		return fmt.Errorf("reflection failed: %w", err)
 	}
+
+	// Update spinner with token count before stopping
+	thinkSpinner.UpdateTokens(reflectResult.OutputTokens)
+	thinkSpinner.Stop()
 
 	// Track tokens
 	ok, tokenMsg := s.tokenTracker.Add(reflectResult.InputTokens, reflectResult.OutputTokens)
@@ -315,9 +335,10 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		Content: reflectResult.Text,
 	})
 
-	// Parse difficulty and display bjarne's reflection
+	// Parse difficulty and display bjarne's reflection with spacing
 	difficulty, reflectionText := parseDifficulty(reflectResult.Text)
-	fmt.Printf("\n%s %s\n", s.theme.Accent("bjarne:"), reflectionText)
+	fmt.Println()
+	fmt.Printf("%s %s\n", s.theme.Accent("bjarne:"), reflectionText)
 
 	// For EASY tasks, skip confirmation and proceed directly
 	if difficulty == "EASY" {
@@ -338,7 +359,7 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 
 		// Check for abort
 		if response == "n" || response == "no" || response == "abort" || response == "cancel" {
-			fmt.Println("Cancelled.")
+			fmt.Println("\nCancelled.")
 			return nil
 		}
 
@@ -351,16 +372,24 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 			Role:    "user",
 			Content: userConfirm + "\n\n" + GenerateNowPrompt,
 		})
+		fmt.Println() // Space after confirmation
 	}
 
 	// Phase 2: Generation
-	fmt.Printf("\n%s Generating with %s...\n", s.theme.Info("bjarne:"), shortModelName(s.config.GenerateModel))
+	fmt.Println() // Space before generation spinner
+	genSpinner := NewThinkingSpinner(fmt.Sprintf("Generating with %s…", shortModelName(s.config.GenerateModel)), s.theme)
+	genSpinner.Start()
 
 	currentModel := s.config.GenerateModel
 	result, err := s.bedrock.GenerateWithModel(ctx, currentModel, GenerationSystemPrompt, s.conversation, s.config.MaxTokens)
 	if err != nil {
+		genSpinner.Fail("Generation failed")
 		return fmt.Errorf("generation failed: %w", err)
 	}
+
+	// Update spinner with tokens and stop
+	genSpinner.UpdateTokens(result.OutputTokens)
+	genSpinner.Success("Code generated")
 
 	// Track tokens
 	ok, tokenMsg = s.tokenTracker.Add(result.InputTokens, result.OutputTokens)
@@ -393,47 +422,39 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		s.lastCode = code
 		s.lastValidated = false
 
-		// Show code (collapsed for iterations > 1)
-		if iteration == 1 {
-			fmt.Printf("\n%s\n", s.theme.Info("Generated code:"))
-			fmt.Println("```cpp")
-			fmt.Println(code)
-			fmt.Println("```")
+		// Run validation silently (code is hidden until validation passes)
+		fmt.Printf("\n%s Validating", s.theme.Info("⠋"))
+		if iteration > 1 {
+			fmt.Printf(" (attempt %d/%d)", iteration, maxIter)
 		}
+		fmt.Println("...")
 
-		// Run validation with spinner UI
-		fmt.Println()
-		results, failedErrors, allPassed := s.runValidationWithSpinner(ctx, code)
+		results, failedErrors, allPassed := s.runValidationQuiet(ctx, code)
 
 		if allPassed {
 			s.lastValidated = true
-			fmt.Printf("\n%s\n", s.theme.Success("✓ All validation passed!"))
-			fmt.Println("Use /save <filename> to save the validated code")
+			// Show success summary with code
+			s.showValidationSuccess(code, results, iteration)
 			return nil
 		}
 
 		// Check if we have iterations left
 		if iteration >= maxIter {
-			fmt.Printf("\n%s\n", s.theme.Error(fmt.Sprintf("Validation failed after %d attempts.", maxIter)))
-			// Show the actual errors on final failure
-			fmt.Println("\nErrors:")
-			for _, r := range results {
-				if !r.Success {
-					fmt.Printf("  %s: %s\n", s.theme.Error(r.Stage), truncateError(r.Error, 200))
-				}
-			}
-			fmt.Println("\nYou can manually ask me to fix specific issues.")
+			s.showValidationFailure(code, results, maxIter)
 			return nil
 		}
+
+		// Show brief failure notice before retrying
+		fmt.Printf("%s Validation failed, ", s.theme.Warning("↻"))
 
 		// Determine which model to use for the fix attempt
 		fixModel := currentModel
 		if s.config.EscalateOnFailure && escalationIndex < len(s.config.EscalationModels) {
 			fixModel = s.config.EscalationModels[escalationIndex]
 			escalationIndex++
-			fmt.Printf("\n%s Escalating to %s...\n", s.theme.Warning("⬆"), shortModelName(fixModel))
+			fmt.Printf("escalating to %s...\n", shortModelName(fixModel))
 		} else {
-			fmt.Printf("\n%s Iterating... (attempt %d/%d)\n", s.theme.Warning("↻"), iteration+1, maxIter)
+			fmt.Printf("retrying...\n")
 		}
 
 		iterationPrompt := fmt.Sprintf(IterationPromptTemplate, failedErrors)
@@ -444,16 +465,17 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 			Content: iterationPrompt,
 		})
 
-		// Show spinner while generating fix
-		spinner := NewSpinner("Generating fix...", s.theme)
-		spinner.Start()
+		// Show thinking spinner while generating fix
+		fixSpinner := NewThinkingSpinner(fmt.Sprintf("Fixing with %s…", shortModelName(fixModel)), s.theme)
+		fixSpinner.Start()
 
 		iterResult, err := s.bedrock.GenerateWithModel(ctx, fixModel, GenerationSystemPrompt, s.conversation, s.config.MaxTokens)
 		if err != nil {
-			spinner.Fail("Generation failed")
+			fixSpinner.Fail("Generation failed")
 			return fmt.Errorf("iteration failed: %w", err)
 		}
-		spinner.Success("Fix generated")
+		fixSpinner.UpdateTokens(iterResult.OutputTokens)
+		fixSpinner.Success("Fix generated")
 
 		// Track tokens
 		ok, tokenMsg := s.tokenTracker.Add(iterResult.InputTokens, iterResult.OutputTokens)
@@ -485,6 +507,90 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 	}
 
 	return nil
+}
+
+// runValidationQuiet runs validation without progress output
+func (s *Session) runValidationQuiet(ctx context.Context, code string) ([]ValidationResult, string, bool) {
+	results, err := s.container.ValidateCode(ctx, code, "code.cpp")
+
+	if err != nil {
+		return nil, err.Error(), false
+	}
+
+	// Check results
+	allPassed := true
+	var failedErrors string
+	for _, r := range results {
+		if !r.Success {
+			allPassed = false
+			failedErrors += fmt.Sprintf("Stage %s failed:\n%s\n", r.Stage, r.Error)
+		}
+	}
+
+	return results, failedErrors, allPassed
+}
+
+// showValidationSuccess displays the code and validation summary on success
+func (s *Session) showValidationSuccess(code string, results []ValidationResult, attempts int) {
+	// Clear the "Validating..." line
+	fmt.Printf("\r\033[K")
+
+	// Show the validated code
+	fmt.Printf("\n%s\n", s.theme.Success("✓ Validated Code:"))
+	fmt.Println("```cpp")
+	fmt.Println(code)
+	fmt.Println("```")
+
+	// Show validation summary
+	fmt.Printf("\n%s\n", s.theme.Success("Validation Summary"))
+	fmt.Println(strings.Repeat("─", 50))
+
+	totalTime := 0.0
+	for _, r := range results {
+		totalTime += r.Duration.Seconds()
+		checkmark := s.theme.Success("☑")
+		fmt.Printf("  %s %s %s(%.2fs)%s\n", checkmark, r.Stage, s.theme.Dim(""), r.Duration.Seconds(), s.theme.Reset())
+	}
+
+	fmt.Println(strings.Repeat("─", 50))
+	fmt.Printf("  %s All %d tests passed", s.theme.Success("✓"), len(results))
+	if attempts > 1 {
+		fmt.Printf(" (after %d attempts)", attempts)
+	}
+	fmt.Printf(" %s[%.2fs total]%s\n", s.theme.Dim(""), totalTime, s.theme.Reset())
+	fmt.Println()
+	fmt.Printf("Use %s to save the validated code\n", s.theme.Accent("/save <filename>"))
+}
+
+// showValidationFailure displays the failure summary
+func (s *Session) showValidationFailure(code string, results []ValidationResult, attempts int) {
+	fmt.Printf("\r\033[K")
+	fmt.Printf("\n%s\n", s.theme.Error(fmt.Sprintf("✗ Validation failed after %d attempts", attempts)))
+	fmt.Println(strings.Repeat("─", 50))
+
+	for _, r := range results {
+		if r.Success {
+			fmt.Printf("  %s %s %s(%.2fs)%s\n", s.theme.Success("☑"), r.Stage, s.theme.Dim(""), r.Duration.Seconds(), s.theme.Reset())
+		} else {
+			fmt.Printf("  %s %s %s(%.2fs)%s\n", s.theme.Error("☒"), r.Stage, s.theme.Dim(""), r.Duration.Seconds(), s.theme.Reset())
+			// Show truncated error
+			errLines := strings.Split(r.Error, "\n")
+			if len(errLines) > 0 && errLines[0] != "" {
+				fmt.Printf("      %s%s%s\n", s.theme.Dim(""), truncateError(errLines[0], 60), s.theme.Reset())
+			}
+		}
+	}
+
+	fmt.Println(strings.Repeat("─", 50))
+	fmt.Println()
+
+	// Still show the code so user can see what failed
+	fmt.Printf("%s\n", s.theme.Warning("Last generated code (failed validation):"))
+	fmt.Println("```cpp")
+	fmt.Println(code)
+	fmt.Println("```")
+	fmt.Println()
+	fmt.Println("You can ask me to fix specific issues.")
 }
 
 // runValidationWithSpinner runs validation with a spinner UI for each stage
