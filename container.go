@@ -186,9 +186,11 @@ func (c *ContainerRuntime) runValidationStage(ctx context.Context, tmpDir, stage
 	// Build container run command
 	// Note: We don't use --read-only because sanitizers need to write to /tmp
 	// Security is maintained via --network none and read-only source mount
+	// seccomp=unconfined is required for TSAN to work (needs ptrace/ASLR control)
 	args := []string{
 		"run", "--rm",
 		"--network", "none", // No network access
+		"--security-opt", "seccomp=unconfined", // Required for TSAN
 		"-v", tmpDir + ":/src:ro", // Mount code read-only
 		"--timeout", "120", // 2 minute timeout
 		c.imageName,
