@@ -228,11 +228,9 @@ func FormatResults(results []ValidationResult) string {
 			allPassed = false
 			sb.WriteString(fmt.Sprintf("✗ %s (%.2fs)\n", r.Stage, r.Duration.Seconds()))
 			if r.Error != "" {
-				// Indent error output
-				lines := strings.Split(strings.TrimSpace(r.Error), "\n")
-				for _, line := range lines {
-					sb.WriteString(fmt.Sprintf("  %s\n", line))
-				}
+				// Parse and format diagnostics based on stage type
+				formatted := formatStageError(r.Stage, r.Error)
+				sb.WriteString(formatted)
 			}
 		}
 	}
@@ -241,5 +239,39 @@ func FormatResults(results []ValidationResult) string {
 		sb.WriteString("\n✓ All validation stages passed!\n")
 	}
 
+	return sb.String()
+}
+
+// formatStageError parses and formats error output based on stage type
+func formatStageError(stage, errorOutput string) string {
+	switch stage {
+	case "clang-tidy":
+		diags := ParseClangTidyOutput(errorOutput)
+		if len(diags) > 0 {
+			return FormatDiagnostics(diags)
+		}
+	case "asan":
+		diags := ParseSanitizerOutput(errorOutput, "asan")
+		if len(diags) > 0 {
+			return FormatDiagnostics(diags)
+		}
+	case "ubsan":
+		diags := ParseSanitizerOutput(errorOutput, "ubsan")
+		if len(diags) > 0 {
+			return FormatDiagnostics(diags)
+		}
+	case "tsan":
+		diags := ParseSanitizerOutput(errorOutput, "tsan")
+		if len(diags) > 0 {
+			return FormatDiagnostics(diags)
+		}
+	}
+
+	// Fallback: indent raw output
+	var sb strings.Builder
+	lines := strings.Split(strings.TrimSpace(errorOutput), "\n")
+	for _, line := range lines {
+		sb.WriteString(fmt.Sprintf("  %s\n", line))
+	}
 	return sb.String()
 }
