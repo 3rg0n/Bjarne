@@ -6,8 +6,10 @@ _Last updated: 2025-12-02_
 
 - Documentation framework established
 - 7 Architecture Decision Records (ADRs) defining core approach
-- Kanban workflow with 24 backlog items across 5 phases
+- Kanban workflow with 25 backlog items across 6 phases
 - Clear distribution strategy via GitHub Releases + ghcr.io
+- **Go CLI skeleton**: Builds and runs, with --version, --help, and REPL
+- **REPL commands**: /help, /save, /clear, /validate, /quit (placeholders for generation)
 
 ## What Exists
 
@@ -15,12 +17,17 @@ _Last updated: 2025-12-02_
 - `tasks/` — Capsule template for task specifications
 - `kanban.md` — Active backlog and workflow tracking
 - `CLAUDE.md` — AI guidance document
-- `amp.agent.md` — Reference implementation from Amp
+- `amp.agent.md` — Reference implementation from Amp (Go patterns)
+- `main.go` — Entry point with --version and --help flags
+- `repl.go` — Interactive REPL loop with /command support
+- `go.mod` — Go module definition
+- `.gitignore` — Git ignore patterns
 
 ## What Does NOT Exist Yet
 
-- Go source code
+- Bedrock client integration
 - Validation container (Dockerfile)
+- Validation pipeline
 - GitHub Actions workflows
 - Test suite
 

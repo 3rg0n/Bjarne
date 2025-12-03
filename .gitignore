@@ -1,0 +1,46 @@
+# Binaries
+bjarne
+bjarne.exe
+bjarne-*
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build output
+dist/
+bin/
+
+# Test artifacts
+*.test
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+
+# Generated code from validation
+*.validated.cpp
+*.validated.c
+
+# Environment files (may contain credentials)
+.env
+.env.local
+.envrc
+
+# Container build cache
+.docker/
+.podman/

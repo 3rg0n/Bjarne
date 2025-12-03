@@ -14,6 +14,7 @@ _Last updated: 2025-12-02_
 | T-001 | Define project vision and populate docs/readme.md | 2025-12-02 |
 | T-002 | Populate docs/project_state.md with initial state | 2025-12-02 |
 | T-003 | Record ADRs 001-007: Core architecture decisions | 2025-12-02 |
+| T-004 | Initialize Go module and project structure | 2025-12-02 |
 
 ---
 
@@ -124,11 +125,11 @@ _Last updated: 2025-12-02_
 
 ## Progress Summary
 
-**Phase 1: Foundation** (Next)
+**Phase 1: Foundation** (In Progress)
 - [x] Project vision defined (T-001)
 - [x] Architecture decisions recorded (T-003)
-- [ ] Go module initialized (T-004)
-- [ ] Interactive REPL (T-005)
+- [x] Go module initialized (T-004)
+- [ ] Interactive REPL (T-005) — basic structure done, needs Bedrock integration
 - [ ] Bedrock client (T-006)
 
 **Phase 2: Validation** (Blocked by Phase 1)
