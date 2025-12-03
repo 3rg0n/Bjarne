@@ -26,6 +26,7 @@ linters-settings:
     confidence: medium
     excludes:
       - G204  # Subprocess launched with variable - intentional for container runtime
+      - G304  # File path provided by user - intentional for validate command
   misspell:
     locale: US
   goimports:

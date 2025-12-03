@@ -142,7 +142,7 @@ func Run() error {
 }
 
 // handleCommand processes slash commands, returns false if should quit
-func (s *Session) handleCommand(_ context.Context, input string) bool {
+func (s *Session) handleCommand(ctx context.Context, input string) bool {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
 		return true
@@ -189,7 +189,7 @@ func (s *Session) handleCommand(_ context.Context, input string) bool {
 			return true
 		}
 		filename := parts[1]
-		fmt.Printf("Validating %s... (not yet implemented - needs container)\n", filename)
+		s.validateFile(ctx, filename)
 
 	case "/code", "/show":
 		if s.lastCode == "" {
@@ -358,4 +358,50 @@ func extractCode(response string) string {
 // saveToFile writes code to a file
 func saveToFile(filename, code string) error {
 	return os.WriteFile(filename, []byte(code), 0600)
+}
+
+// validateFile validates an existing file without AI generation
+func (s *Session) validateFile(ctx context.Context, filename string) {
+	// Read the file
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		fmt.Printf("\033[91mError:\033[0m Could not read file: %v\n", err)
+		return
+	}
+
+	code := string(content)
+	if code == "" {
+		fmt.Println("\033[91mError:\033[0m File is empty")
+		return
+	}
+
+	fmt.Printf("\n\033[93mValidating %s...\033[0m\n", filename)
+
+	// Run validation pipeline
+	results, err := s.container.ValidateCode(ctx, code, filename)
+	if err != nil {
+		fmt.Printf("\033[91mValidation error:\033[0m %v\n", err)
+		return
+	}
+
+	fmt.Println(FormatResults(results))
+
+	// Check if all passed
+	allPassed := true
+	for _, r := range results {
+		if !r.Success {
+			allPassed = false
+			break
+		}
+	}
+
+	if allPassed {
+		s.lastCode = code
+		s.lastValidated = true
+		fmt.Printf("\033[92m✓ %s passed all validation!\033[0m\n", filename)
+	} else {
+		s.lastCode = code
+		s.lastValidated = false
+		fmt.Println("\033[93mValidation failed.\033[0m Fix the issues and try again.")
+	}
 }
