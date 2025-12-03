@@ -144,6 +144,39 @@ When choosing between approaches (e.g., database choice, auth strategy, state ma
 2. **Current state:** Check `docs/project_state.md` for capabilities and constraints
 3. **History:** Review `docs/decisions.md` for architectural reasoning
 
+## Build, Lint & Test
+
+### Required Commands
+
+Before committing any Go code:
+
+```bash
+# Format code
+gofmt -w *.go
+
+# Run linter (must pass with no errors)
+golangci-lint run
+
+# Run all tests (must pass)
+go test ./... -v
+```
+
+### Linter Configuration
+
+The project uses `golangci-lint` with strict settings defined in `.golangci.yml`:
+- Security checks (gosec)
+- Error handling (errcheck, nilerr)
+- Code simplification (gosimple, unconvert)
+- Unused code detection (unused, unparam)
+- Formatting (gofmt, goimports)
+
+### Test Coverage Requirements
+
+- All exported functions should have unit tests
+- Test files: `*_test.go` in same package
+- Use table-driven tests for multiple cases
+- Run tests before every commit
+
 ## Guardrails & Quality Gates
 
 ### Pre-Implementation Checklist
@@ -164,7 +197,9 @@ Before writing any code:
 ### Pre-Commit Checklist
 
 Before committing:
-- [ ] All tests pass
+- [ ] Code formatted: `gofmt -w *.go`
+- [ ] Linter passes: `golangci-lint run`
+- [ ] All tests pass: `go test ./... -v`
 - [ ] Code follows project constraints from `docs/readme.md`
 - [ ] `docs/project_state.md` updated with new capabilities/changes
 - [ ] Commit message includes capsule reference (T-XXX)

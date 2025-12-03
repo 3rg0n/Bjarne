@@ -70,11 +70,11 @@ func (c *ContainerRuntime) PullImage(ctx context.Context) error {
 
 // ValidationResult holds the result of a validation run
 type ValidationResult struct {
-	Stage      string // "clang-tidy", "compile", "asan", "ubsan", "tsan", "run"
-	Success    bool
-	Output     string
-	Error      string
-	Duration   time.Duration
+	Stage    string // "clang-tidy", "compile", "asan", "ubsan", "tsan", "run"
+	Success  bool
+	Output   string
+	Error    string
+	Duration time.Duration
 }
 
 // ValidateCode runs the full validation pipeline on a code string
@@ -84,18 +84,18 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Write code to temp file
 	codePath := filepath.Join(tmpDir, filename)
-	if err := os.WriteFile(codePath, []byte(code), 0644); err != nil {
+	if err := os.WriteFile(codePath, []byte(code), 0600); err != nil {
 		return nil, fmt.Errorf("failed to write code file: %w", err)
 	}
 
 	var results []ValidationResult
 
 	// Stage 1: clang-tidy (static analysis)
-	result := c.runValidationStage(ctx, tmpDir, filename, "clang-tidy",
+	result := c.runValidationStage(ctx, tmpDir, "clang-tidy",
 		"clang-tidy", "/src/"+filename, "--", "-std=c++17", "-Wall", "-Wextra")
 	results = append(results, result)
 	if !result.Success {
@@ -103,7 +103,7 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 	}
 
 	// Stage 2: Compile with strict warnings
-	result = c.runValidationStage(ctx, tmpDir, filename, "compile",
+	result = c.runValidationStage(ctx, tmpDir, "compile",
 		"clang++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
 		"-fstack-protector-all", "-D_FORTIFY_SOURCE=2",
 		"-o", "/tmp/test", "/src/"+filename)
@@ -113,7 +113,7 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 	}
 
 	// Stage 3: ASAN (AddressSanitizer)
-	result = c.runValidationStage(ctx, tmpDir, filename, "asan",
+	result = c.runValidationStage(ctx, tmpDir, "asan",
 		"sh", "-c",
 		"clang++ -std=c++17 -fsanitize=address -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
 	results = append(results, result)
@@ -122,7 +122,7 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 	}
 
 	// Stage 4: UBSAN (UndefinedBehaviorSanitizer)
-	result = c.runValidationStage(ctx, tmpDir, filename, "ubsan",
+	result = c.runValidationStage(ctx, tmpDir, "ubsan",
 		"sh", "-c",
 		"clang++ -std=c++17 -fsanitize=undefined -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
 	results = append(results, result)
@@ -132,7 +132,7 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 
 	// Stage 5: Check if code uses threads, run TSAN if so
 	if codeUsesThreads(code) {
-		result = c.runValidationStage(ctx, tmpDir, filename, "tsan",
+		result = c.runValidationStage(ctx, tmpDir, "tsan",
 			"sh", "-c",
 			"clang++ -std=c++17 -fsanitize=thread -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
 		results = append(results, result)
@@ -142,7 +142,7 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 	}
 
 	// Stage 6: Final run (clean execution)
-	result = c.runValidationStage(ctx, tmpDir, filename, "run",
+	result = c.runValidationStage(ctx, tmpDir, "run",
 		"sh", "-c",
 		"clang++ -std=c++17 -O2 -o /tmp/test /src/"+filename+" && /tmp/test")
 	results = append(results, result)
@@ -151,17 +151,17 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 }
 
 // runValidationStage runs a single validation stage in the container
-func (c *ContainerRuntime) runValidationStage(ctx context.Context, tmpDir, filename, stage string, command ...string) ValidationResult {
+func (c *ContainerRuntime) runValidationStage(ctx context.Context, tmpDir, stage string, command ...string) ValidationResult {
 	start := time.Now()
 
 	// Build container run command
 	args := []string{
 		"run", "--rm",
-		"--network", "none",                        // No network access
-		"--read-only",                              // Read-only root filesystem
+		"--network", "none", // No network access
+		"--read-only",                               // Read-only root filesystem
 		"--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", // Writable /tmp for compilation
-		"-v", tmpDir + ":/src:ro",                  // Mount code read-only
-		"--timeout", "120",                         // 2 minute timeout
+		"-v", tmpDir + ":/src:ro", // Mount code read-only
+		"--timeout", "120", // 2 minute timeout
 		c.imageName,
 	}
 	args = append(args, command...)

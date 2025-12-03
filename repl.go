@@ -100,7 +100,7 @@ func Run() error {
 }
 
 // handleCommand processes slash commands, returns false if should quit
-func (s *Session) handleCommand(ctx context.Context, input string) bool {
+func (s *Session) handleCommand(_ context.Context, input string) bool {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
 		return true
@@ -168,20 +168,20 @@ func (s *Session) handleCommand(ctx context.Context, input string) bool {
 }
 
 func printCommandHelp() {
-	fmt.Println(`
-Available Commands:
-  /help, /h              Show this help
-  /save <file>, /s       Save last generated code to file
-  /clear, /c             Clear conversation history
-  /validate <file>, /v   Validate existing file (without generation)
-  /code, /show           Show last generated code
-  /quit, /q              Exit bjarne
-
-Tips:
-  - Just type your request to generate C/C++ code
-  - All generated code is automatically validated
-  - Use /save to write validated code to a file
-`)
+	fmt.Println("")
+	fmt.Println("Available Commands:")
+	fmt.Println("  /help, /h              Show this help")
+	fmt.Println("  /save <file>, /s       Save last generated code to file")
+	fmt.Println("  /clear, /c             Clear conversation history")
+	fmt.Println("  /validate <file>, /v   Validate existing file (without generation)")
+	fmt.Println("  /code, /show           Show last generated code")
+	fmt.Println("  /quit, /q              Exit bjarne")
+	fmt.Println("")
+	fmt.Println("Tips:")
+	fmt.Println("  - Just type your request to generate C/C++ code")
+	fmt.Println("  - All generated code is automatically validated")
+	fmt.Println("  - Use /save to write validated code to a file")
+	fmt.Println("")
 }
 
 // handlePrompt processes a code generation request
@@ -262,5 +262,5 @@ func extractCode(response string) string {
 
 // saveToFile writes code to a file
 func saveToFile(filename, code string) error {
-	return os.WriteFile(filename, []byte(code), 0644)
+	return os.WriteFile(filename, []byte(code), 0600)
 }
