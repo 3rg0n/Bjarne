@@ -30,7 +30,7 @@ linters-settings:
   misspell:
     locale: US
   goimports:
-    local-prefixes: github.com/ecopelan/bjarne
+    local-prefixes: github.com/3rg0n/bjarne
 
 issues:
   exclude-use-default: false

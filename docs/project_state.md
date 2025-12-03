@@ -125,7 +125,7 @@ See `kanban.md` for full backlog.
                                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   bjarne-validator Container                    │
-│                 (ghcr.io/ecopelan/bjarne-validator)             │
+│                 (ghcr.io/3rg0n/bjarne-validator)             │
 ├─────────────────────────────────────────────────────────────────┤
 │  Pipeline: clang-tidy → compile → ASAN → UBSAN → [TSAN] → run  │
 │                                                                 │

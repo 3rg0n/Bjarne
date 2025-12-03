@@ -14,6 +14,7 @@ type Session struct {
 	bedrock       *BedrockClient
 	container     *ContainerRuntime
 	config        *Config
+	theme         *Theme
 	tokenTracker  *TokenTracker
 	conversation  []Message
 	lastCode      string
@@ -94,12 +95,16 @@ func Run() error {
 
 	// Initialize Bedrock client
 	fmt.Println("Connecting to AWS Bedrock...")
-	bedrock, err := NewBedrockClient(ctx)
+	bedrock, err := NewBedrockClient(ctx, cfg.GenerateModel)
 	if err != nil {
 		fmt.Print(FormatUserError(err))
 		return err
 	}
-	fmt.Printf("Using model: %s\n", bedrock.GetModelID())
+	fmt.Printf("Chat model: %s\n", shortModelName(cfg.ChatModel))
+	fmt.Printf("Generate model: %s\n", shortModelName(cfg.GenerateModel))
+	if cfg.EscalateOnFailure && len(cfg.EscalationModels) > 0 {
+		fmt.Printf("Escalation: enabled (%d models)\n", len(cfg.EscalationModels))
+	}
 	fmt.Println()
 	fmt.Println("Type /help for commands, /quit to exit")
 	fmt.Println()
@@ -108,6 +113,7 @@ func Run() error {
 		bedrock:      bedrock,
 		container:    container,
 		config:       cfg,
+		theme:        cfg.Theme,
 		tokenTracker: NewTokenTracker(cfg.MaxTotalTokens, cfg.WarnTokenThreshold),
 		conversation: []Message{},
 	}
@@ -115,7 +121,7 @@ func Run() error {
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
-		fmt.Print("\033[94m>\033[0m ")
+		fmt.Print(session.theme.PromptCode() + ">" + session.theme.Reset() + " ")
 
 		if !scanner.Scan() {
 			break
@@ -211,7 +217,7 @@ func (s *Session) handleCommand(ctx context.Context, input string) bool {
 
 	case "/tokens", "/t":
 		input, output, total := s.tokenTracker.GetUsage()
-		fmt.Printf("\n\033[93mToken Usage:\033[0m\n")
+		fmt.Printf("\n%s\n", s.theme.Warning("Token Usage:"))
 		fmt.Printf("  Input tokens:  %d\n", input)
 		fmt.Printf("  Output tokens: %d\n", output)
 		fmt.Printf("  Total tokens:  %d\n", total)
@@ -223,6 +229,30 @@ func (s *Session) handleCommand(ctx context.Context, input string) bool {
 			fmt.Printf("  Budget:        unlimited\n")
 		}
 		fmt.Println()
+
+	case "/config":
+		s.showConfig()
+
+	case "/theme":
+		if len(parts) < 2 {
+			fmt.Printf("Current theme: %s\n", s.config.Settings.Theme.Name)
+			fmt.Printf("Available themes: %s\n", strings.Join(AvailableThemes(), ", "))
+			return true
+		}
+		themeName := strings.ToLower(parts[1])
+		if _, ok := ThemePresets[themeName]; !ok {
+			fmt.Printf("%s Unknown theme: %s\n", s.theme.Error("Error:"), themeName)
+			fmt.Printf("Available themes: %s\n", strings.Join(AvailableThemes(), ", "))
+			return true
+		}
+		s.config.Settings.Theme.Name = themeName
+		s.theme = NewTheme(&s.config.Settings.Theme)
+		s.config.Theme = s.theme
+		if err := SaveSettings(s.config.Settings); err != nil {
+			fmt.Printf("%s Could not save settings: %v\n", s.theme.Warning("Warning:"), err)
+		} else {
+			fmt.Printf("%s Theme changed to %s (saved)\n", s.theme.Success("✓"), themeName)
+		}
 
 	default:
 		fmt.Printf("\033[91mUnknown command:\033[0m %s\n", cmd)
@@ -241,18 +271,21 @@ func printCommandHelp() {
 	fmt.Println("  /validate <file>, /v   Validate existing file (without generation)")
 	fmt.Println("  /code, /show           Show last generated code")
 	fmt.Println("  /tokens, /t            Show token usage and budget")
+	fmt.Println("  /config                Show current configuration")
+	fmt.Println("  /theme [name]          Show or change theme (default, matrix, solarized, gruvbox, dracula, nord)")
 	fmt.Println("  /quit, /q              Exit bjarne")
 	fmt.Println("")
 	fmt.Println("Tips:")
 	fmt.Println("  - Just type your request to generate C/C++ code")
 	fmt.Println("  - All generated code is automatically validated")
+	fmt.Println("  - Failed validations automatically escalate to more powerful models")
 	fmt.Println("  - Use /save to write validated code to a file")
 	fmt.Println("")
 }
 
-// handlePrompt processes a code generation request with automatic iteration
+// handlePrompt processes a code generation request with automatic iteration and model escalation
 func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
-	fmt.Println("\033[93mbjarne:\033[0m Generating...")
+	fmt.Printf("%s Generating with %s...\n", s.theme.Info("bjarne:"), shortModelName(s.config.GenerateModel))
 
 	// Add user message to conversation
 	s.conversation = append(s.conversation, Message{
@@ -260,8 +293,9 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		Content: prompt,
 	})
 
-	// Call Bedrock with token tracking
-	result, err := s.bedrock.GenerateWithTokens(ctx, SystemPrompt, s.conversation, s.config.MaxTokens)
+	// Call Bedrock with initial model
+	currentModel := s.config.GenerateModel
+	result, err := s.bedrock.GenerateWithModel(ctx, currentModel, SystemPrompt, s.conversation, s.config.MaxTokens)
 	if err != nil {
 		return fmt.Errorf("generation failed: %w", err)
 	}
@@ -269,7 +303,7 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 	// Track tokens
 	ok, tokenMsg := s.tokenTracker.Add(result.InputTokens, result.OutputTokens)
 	if tokenMsg != "" {
-		fmt.Printf("\033[93m%s\033[0m\n", tokenMsg)
+		fmt.Printf("%s\n", s.theme.Warning(tokenMsg))
 	}
 	if !ok {
 		return fmt.Errorf("token budget exceeded")
@@ -285,30 +319,32 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 	code := extractCode(result.Text)
 	if code == "" {
 		// No code block found, just display response
-		fmt.Printf("\n\033[93mbjarne:\033[0m %s\n", result.Text)
+		fmt.Printf("\n%s %s\n", s.theme.Info("bjarne:"), result.Text)
 		return nil
 	}
 
-	// Validation loop with configurable max iterations
+	// Validation loop with configurable max iterations and model escalation
 	maxIter := s.config.MaxIterations
+	escalationIndex := 0 // Track which escalation model to use next
+
 	for iteration := 1; iteration <= maxIter; iteration++ {
 		s.lastCode = code
 		s.lastValidated = false
 
 		if iteration > 1 {
-			fmt.Printf("\n\033[93mIteration %d/%d:\033[0m\n", iteration, maxIter)
+			fmt.Printf("\n%s\n", s.theme.Warning(fmt.Sprintf("Iteration %d/%d:", iteration, maxIter)))
 		}
 
-		fmt.Println("\n\033[93mGenerated code:\033[0m")
+		fmt.Printf("\n%s\n", s.theme.Info("Generated code:"))
 		fmt.Println("```cpp")
 		fmt.Println(code)
 		fmt.Println("```")
 
 		// Run validation pipeline
-		fmt.Println("\n\033[93mValidating...\033[0m")
+		fmt.Printf("\n%s\n", s.theme.Info("Validating..."))
 		results, err := s.container.ValidateCode(ctx, code, "code.cpp")
 		if err != nil {
-			fmt.Printf("\033[91mValidation error:\033[0m %v\n", err)
+			fmt.Printf("%s %v\n", s.theme.Error("Validation error:"), err)
 			return nil
 		}
 
@@ -326,20 +362,27 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 
 		if allPassed {
 			s.lastValidated = true
-			fmt.Println("\033[92m✓ All validation passed!\033[0m")
+			fmt.Println(s.theme.Success("✓ All validation passed!"))
 			fmt.Println("Use /save <filename> to save the validated code")
 			return nil
 		}
 
 		// Check if we have iterations left
 		if iteration >= maxIter {
-			fmt.Printf("\033[91mValidation failed after %d attempts.\033[0m\n", maxIter)
+			fmt.Println(s.theme.Error(fmt.Sprintf("Validation failed after %d attempts.", maxIter)))
 			fmt.Println("You can manually ask me to fix specific issues.")
 			return nil
 		}
 
-		// Automatically iterate: ask Claude to fix the errors
-		fmt.Printf("\033[93mValidation failed. Attempting fix (%d/%d)...\033[0m\n", iteration+1, maxIter)
+		// Determine which model to use for the fix attempt
+		fixModel := currentModel
+		if s.config.EscalateOnFailure && escalationIndex < len(s.config.EscalationModels) {
+			fixModel = s.config.EscalationModels[escalationIndex]
+			escalationIndex++
+			fmt.Printf("%s Escalating to %s for fix attempt...\n", s.theme.Warning("⬆"), shortModelName(fixModel))
+		} else {
+			fmt.Printf("%s Attempting fix (%d/%d)...\n", s.theme.Warning("Validation failed."), iteration+1, maxIter)
+		}
 
 		iterationPrompt := fmt.Sprintf(IterationPromptTemplate, failedErrors)
 
@@ -349,8 +392,8 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 			Content: iterationPrompt,
 		})
 
-		// Call Bedrock for fix with token tracking
-		iterResult, err := s.bedrock.GenerateWithTokens(ctx, SystemPrompt, s.conversation, s.config.MaxTokens)
+		// Call Bedrock for fix with potentially escalated model
+		iterResult, err := s.bedrock.GenerateWithModel(ctx, fixModel, SystemPrompt, s.conversation, s.config.MaxTokens)
 		if err != nil {
 			return fmt.Errorf("iteration failed: %w", err)
 		}
@@ -358,10 +401,10 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		// Track tokens
 		ok, tokenMsg := s.tokenTracker.Add(iterResult.InputTokens, iterResult.OutputTokens)
 		if tokenMsg != "" {
-			fmt.Printf("\033[93m%s\033[0m\n", tokenMsg)
+			fmt.Printf("%s\n", s.theme.Warning(tokenMsg))
 		}
 		if !ok {
-			fmt.Println("\033[91mToken budget exceeded during iteration.\033[0m")
+			fmt.Println(s.theme.Error("Token budget exceeded during iteration."))
 			fmt.Println("Use /clear to start a new conversation.")
 			return nil
 		}
@@ -375,12 +418,13 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		// Extract new code
 		newCode := extractCode(iterResult.Text)
 		if newCode == "" {
-			fmt.Println("\033[91mNo code in iteration response.\033[0m")
-			fmt.Printf("\n\033[93mbjarne:\033[0m %s\n", iterResult.Text)
+			fmt.Println(s.theme.Error("No code in iteration response."))
+			fmt.Printf("\n%s %s\n", s.theme.Info("bjarne:"), iterResult.Text)
 			return nil
 		}
 
 		code = newCode
+		currentModel = fixModel // Update current model for display purposes
 	}
 
 	return nil
@@ -400,6 +444,65 @@ func extractCode(response string) string {
 // saveToFile writes code to a file
 func saveToFile(filename, code string) error {
 	return os.WriteFile(filename, []byte(code), 0600)
+}
+
+// showConfig displays current configuration
+func (s *Session) showConfig() {
+	fmt.Println()
+	fmt.Println(s.theme.Warning("Current Configuration:"))
+	fmt.Println()
+
+	fmt.Println("  Models:")
+	fmt.Printf("    Chat:     %s\n", shortModelName(s.config.ChatModel))
+	fmt.Printf("    Generate: %s\n", shortModelName(s.config.GenerateModel))
+	if len(s.config.EscalationModels) > 0 {
+		fmt.Println("    Escalation:")
+		for i, m := range s.config.EscalationModels {
+			fmt.Printf("      %d. %s\n", i+1, shortModelName(m))
+		}
+	}
+	fmt.Println()
+
+	fmt.Println("  Validation:")
+	fmt.Printf("    Max iterations:  %d\n", s.config.MaxIterations)
+	fmt.Printf("    Escalate on fail: %v\n", s.config.EscalateOnFailure)
+	fmt.Printf("    Container image: %s\n", s.config.ValidatorImage)
+	fmt.Println()
+
+	fmt.Println("  Tokens:")
+	fmt.Printf("    Max per response: %d\n", s.config.MaxTokens)
+	if s.config.MaxTotalTokens > 0 {
+		fmt.Printf("    Max per session:  %d\n", s.config.MaxTotalTokens)
+	} else {
+		fmt.Printf("    Max per session:  unlimited\n")
+	}
+	fmt.Println()
+
+	fmt.Println("  Theme:")
+	fmt.Printf("    Current: %s\n", s.config.Settings.Theme.Name)
+	fmt.Printf("    Available: %s\n", strings.Join(AvailableThemes(), ", "))
+	fmt.Println()
+
+	path, err := SettingsPath()
+	if err == nil {
+		fmt.Printf("  Settings file: %s\n", path)
+	}
+	fmt.Println()
+}
+
+// shortModelName extracts a readable model name from the full ID
+func shortModelName(modelID string) string {
+	// global.anthropic.claude-haiku-4-5-20251001-v1:0 -> claude-haiku-4-5
+	parts := strings.Split(modelID, ".")
+	if len(parts) >= 3 {
+		modelPart := parts[2] // claude-haiku-4-5-20251001-v1:0
+		// Remove version suffix like -20251001-v1:0
+		if idx := strings.Index(modelPart, "-202"); idx > 0 {
+			return modelPart[:idx]
+		}
+		return modelPart
+	}
+	return modelID
 }
 
 // validateFile validates an existing file without AI generation

@@ -13,8 +13,8 @@ import (
 
 // BedrockClient wraps the AWS Bedrock Runtime client
 type BedrockClient struct {
-	client  *bedrockruntime.Client
-	modelID string
+	client       *bedrockruntime.Client
+	defaultModel string
 }
 
 // Message represents a conversation message
@@ -52,7 +52,7 @@ type GenerateResult struct {
 }
 
 // NewBedrockClient creates a new Bedrock client with configuration from environment
-func NewBedrockClient(ctx context.Context) (*BedrockClient, error) {
+func NewBedrockClient(ctx context.Context, defaultModel string) (*BedrockClient, error) {
 	// Load AWS config from environment/credentials
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(getEnvOrDefault("AWS_REGION", "us-east-1")),
@@ -61,29 +61,30 @@ func NewBedrockClient(ctx context.Context) (*BedrockClient, error) {
 		return nil, ErrAWSConfig(err)
 	}
 
-	// Get model ID from environment or use default
-	// Note: Use global. prefix for cross-region inference profiles
-	modelID := getEnvOrDefault("BJARNE_MODEL", "global.anthropic.claude-sonnet-4-20250514-v1:0")
-
 	client := bedrockruntime.NewFromConfig(cfg)
 
 	return &BedrockClient{
-		client:  client,
-		modelID: modelID,
+		client:       client,
+		defaultModel: defaultModel,
 	}, nil
 }
 
-// Generate sends a prompt to Claude and returns the generated code
+// Generate sends a prompt to Claude and returns the generated code (uses default model)
 func (b *BedrockClient) Generate(ctx context.Context, systemPrompt string, messages []Message) (string, error) {
-	result, err := b.GenerateWithTokens(ctx, systemPrompt, messages, 4096)
+	result, err := b.GenerateWithModel(ctx, b.defaultModel, systemPrompt, messages, 4096)
 	if err != nil {
 		return "", err
 	}
 	return result.Text, nil
 }
 
-// GenerateWithTokens sends a prompt and returns response with token usage
+// GenerateWithTokens sends a prompt and returns response with token usage (uses default model)
 func (b *BedrockClient) GenerateWithTokens(ctx context.Context, systemPrompt string, messages []Message, maxTokens int) (*GenerateResult, error) {
+	return b.GenerateWithModel(ctx, b.defaultModel, systemPrompt, messages, maxTokens)
+}
+
+// GenerateWithModel sends a prompt to a specific model and returns response with token usage
+func (b *BedrockClient) GenerateWithModel(ctx context.Context, modelID, systemPrompt string, messages []Message, maxTokens int) (*GenerateResult, error) {
 	request := ClaudeRequest{
 		AnthropicVersion: "bedrock-2023-05-31",
 		MaxTokens:        maxTokens,
@@ -97,7 +98,7 @@ func (b *BedrockClient) GenerateWithTokens(ctx context.Context, systemPrompt str
 	}
 
 	output, err := b.client.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
-		ModelId:     aws.String(b.modelID),
+		ModelId:     aws.String(modelID),
 		Body:        requestBody,
 		ContentType: aws.String("application/json"),
 	})
@@ -125,9 +126,9 @@ func (b *BedrockClient) GenerateWithTokens(ctx context.Context, systemPrompt str
 	}, nil
 }
 
-// GetModelID returns the configured model ID
-func (b *BedrockClient) GetModelID() string {
-	return b.modelID
+// GetDefaultModel returns the configured default model ID
+func (b *BedrockClient) GetDefaultModel() string {
+	return b.defaultModel
 }
 
 // getEnvOrDefault returns the environment variable value or a default

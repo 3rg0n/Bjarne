@@ -157,5 +157,5 @@ Examples:
   $ bjarne --validate mycode.cpp
   $ bjarne -v file1.cpp file2.cpp file3.cpp
 
-For more information: https://github.com/ecopelan/bjarne`)
+For more information: https://github.com/3rg0n/bjarne`)
 }

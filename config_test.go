@@ -16,6 +16,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.MaxTotalTokens != 150000 {
 		t.Errorf("MaxTotalTokens = %d, want 150000", cfg.MaxTotalTokens)
 	}
+	if cfg.Theme == nil {
+		t.Error("Theme should not be nil")
+	}
+	if cfg.Settings == nil {
+		t.Error("Settings should not be nil")
+	}
 }
 
 func TestLoadConfig(t *testing.T) {
@@ -25,6 +31,7 @@ func TestLoadConfig(t *testing.T) {
 	t.Setenv("BJARNE_MAX_TOTAL_TOKENS", "50000")
 	t.Setenv("BJARNE_MODEL", "test-model")
 	t.Setenv("BJARNE_VALIDATOR_IMAGE", "test:image")
+	t.Setenv("BJARNE_THEME", "matrix")
 
 	cfg := LoadConfig()
 
@@ -37,8 +44,8 @@ func TestLoadConfig(t *testing.T) {
 	if cfg.MaxTotalTokens != 50000 {
 		t.Errorf("MaxTotalTokens = %d, want 50000", cfg.MaxTotalTokens)
 	}
-	if cfg.ModelID != "test-model" {
-		t.Errorf("ModelID = %q, want test-model", cfg.ModelID)
+	if cfg.GenerateModel != "test-model" {
+		t.Errorf("GenerateModel = %q, want test-model", cfg.GenerateModel)
 	}
 	if cfg.ValidatorImage != "test:image" {
 		t.Errorf("ValidatorImage = %q, want test:image", cfg.ValidatorImage)
@@ -46,6 +53,9 @@ func TestLoadConfig(t *testing.T) {
 	// WarnAt should be 80% of 50000 = 40000
 	if cfg.WarnTokenThreshold != 40000 {
 		t.Errorf("WarnTokenThreshold = %d, want 40000", cfg.WarnTokenThreshold)
+	}
+	if cfg.Settings.Theme.Name != "matrix" {
+		t.Errorf("Theme.Name = %q, want matrix", cfg.Settings.Theme.Name)
 	}
 }
 

@@ -1,4 +1,4 @@
-module github.com/ecopelan/bjarne
+module github.com/3rg0n/bjarne
 
 go 1.25.3
 

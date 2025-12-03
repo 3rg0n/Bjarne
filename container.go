@@ -14,7 +14,7 @@ import (
 // ContainerRuntime represents a container runtime (podman or docker)
 type ContainerRuntime struct {
 	binary    string // "podman" or "docker"
-	imageName string // e.g., "bjarne-validator:latest" or "ghcr.io/ecopelan/bjarne-validator:latest"
+	imageName string // e.g., "bjarne-validator:latest" or "ghcr.io/3rg0n/bjarne-validator:latest"
 }
 
 // DetectContainerRuntime finds an available container runtime
@@ -46,7 +46,7 @@ func getImageName() string {
 		return img
 	}
 	// Default to ghcr.io hosted image
-	return "ghcr.io/ecopelan/bjarne-validator:latest"
+	return "ghcr.io/3rg0n/bjarne-validator:latest"
 }
 
 // GetBinary returns the container runtime binary name

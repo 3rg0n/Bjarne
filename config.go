@@ -5,47 +5,64 @@ import (
 	"strconv"
 )
 
-// Config holds runtime configuration
+// Config holds runtime configuration (merged from settings.json + env vars)
 type Config struct {
-	// Iteration limits
-	MaxIterations int // Maximum validation retry attempts (default: 3)
+	// Settings (loaded from ~/.bjarne/settings.json)
+	Settings *Settings
 
-	// Token budget
-	MaxTokens          int // Maximum tokens per response (default: 4096)
-	MaxTotalTokens     int // Maximum total tokens per session (default: 100000, 0 = unlimited)
-	WarnTokenThreshold int // Warn when approaching limit (default: 80% of max)
+	// Theme (created from settings)
+	Theme *Theme
+
+	// Derived/override values (env vars override settings)
+	MaxIterations      int
+	MaxTokens          int
+	MaxTotalTokens     int
+	WarnTokenThreshold int
+	ValidatorImage     string
 
 	// Model configuration
-	ModelID string // Claude model ID
-
-	// Container configuration
-	ValidatorImage string // Container image for validation
+	ChatModel         string   // Model for chat/non-code responses
+	GenerateModel     string   // Model for initial code generation
+	EscalationModels  []string // Models to try on validation failure
+	EscalateOnFailure bool
 }
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
+	settings := DefaultSettings()
+	return configFromSettings(settings)
+}
+
+// configFromSettings creates a Config from Settings
+func configFromSettings(settings *Settings) *Config {
 	return &Config{
-		MaxIterations:      3,
-		MaxTokens:          8192,   // Max tokens per response
-		MaxTotalTokens:     150000, // Conservative budget within 200k context window
-		WarnTokenThreshold: 120000, // Warn at 80% of budget
-		ModelID:            "global.anthropic.claude-sonnet-4-20250514-v1:0",
-		ValidatorImage:     "ghcr.io/ecopelan/bjarne-validator:latest",
+		Settings:           settings,
+		Theme:              NewTheme(&settings.Theme),
+		MaxIterations:      settings.Validation.MaxIterations,
+		MaxTokens:          settings.Tokens.MaxPerResponse,
+		MaxTotalTokens:     settings.Tokens.MaxPerSession,
+		WarnTokenThreshold: settings.Tokens.MaxPerSession * 80 / 100,
+		ValidatorImage:     settings.Container.Image,
+		ChatModel:          settings.Models.Chat,
+		GenerateModel:      settings.Models.Generate,
+		EscalationModels:   settings.Models.Escalation,
+		EscalateOnFailure:  settings.Validation.EscalateOnFailure,
 	}
 }
 
-// LoadConfig loads configuration from environment variables
+// LoadConfig loads configuration from settings.json, then applies env var overrides
 func LoadConfig() *Config {
-	cfg := DefaultConfig()
+	// Load settings from file (or defaults if not found)
+	settings, _ := LoadSettings()
+	cfg := configFromSettings(settings)
 
-	// Iteration limits
+	// Environment variable overrides
 	if val := os.Getenv("BJARNE_MAX_ITERATIONS"); val != "" {
 		if n, err := strconv.Atoi(val); err == nil && n > 0 {
 			cfg.MaxIterations = n
 		}
 	}
 
-	// Token budget
 	if val := os.Getenv("BJARNE_MAX_TOKENS"); val != "" {
 		if n, err := strconv.Atoi(val); err == nil && n > 0 {
 			cfg.MaxTokens = n
@@ -58,17 +75,26 @@ func LoadConfig() *Config {
 		}
 	}
 
-	// Model configuration
+	// Model overrides (single model override applies to generate)
 	if val := os.Getenv("BJARNE_MODEL"); val != "" {
-		cfg.ModelID = val
+		cfg.GenerateModel = val
+	}
+	if val := os.Getenv("BJARNE_CHAT_MODEL"); val != "" {
+		cfg.ChatModel = val
 	}
 
-	// Container configuration
 	if val := os.Getenv("BJARNE_VALIDATOR_IMAGE"); val != "" {
 		cfg.ValidatorImage = val
 	}
 
-	// Calculate warning threshold (80% of max)
+	if val := os.Getenv("BJARNE_THEME"); val != "" {
+		if _, ok := ThemePresets[val]; ok {
+			cfg.Settings.Theme.Name = val
+			cfg.Theme = NewTheme(&cfg.Settings.Theme)
+		}
+	}
+
+	// Recalculate warning threshold if max changed
 	if cfg.MaxTotalTokens > 0 {
 		cfg.WarnTokenThreshold = cfg.MaxTotalTokens * 80 / 100
 	}

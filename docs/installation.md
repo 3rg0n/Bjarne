@@ -4,7 +4,7 @@
 
 ### 1. Download bjarne
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/ecopelan/bjarne/releases):
+Download the latest release for your platform from [GitHub Releases](https://github.com/3rg0n/bjarne/releases):
 
 | Platform | Download |
 |----------|----------|
@@ -70,7 +70,7 @@ bjarne prefers Podman (daemonless, rootless) but falls back to Docker automatica
 | `AWS_SECRET_ACCESS_KEY` | AWS secret key | (required) |
 | `AWS_REGION` | AWS region | `us-east-1` |
 | `BJARNE_MODEL` | Claude model ID | `global.anthropic.claude-sonnet-4-20250514-v1:0` |
-| `BJARNE_VALIDATOR_IMAGE` | Custom validator image | `ghcr.io/ecopelan/bjarne-validator:latest` |
+| `BJARNE_VALIDATOR_IMAGE` | Custom validator image | `ghcr.io/3rg0n/bjarne-validator:latest` |
 
 ### Custom Model
 
@@ -97,7 +97,7 @@ export BJARNE_MODEL="global.anthropic.claude-sonnet-4-20250514-v1:0"
 ### Build
 
 ```bash
-git clone https://github.com/ecopelan/bjarne.git
+git clone https://github.com/3rg0n/bjarne.git
 cd bjarne
 go build -o bjarne .
 ```
@@ -178,7 +178,7 @@ Your IAM user/role needs `bedrock:InvokeModel` permission. Add this policy:
 ### Container pull fails
 
 1. Check internet connectivity
-2. Try pulling manually: `podman pull ghcr.io/ecopelan/bjarne-validator:latest`
+2. Try pulling manually: `podman pull ghcr.io/3rg0n/bjarne-validator:latest`
 3. Build locally if registry is blocked (see "Building the Validation Container")
 
 ### Validation timeout
@@ -199,7 +199,7 @@ sudo rm /usr/local/bin/bjarne
 ### Remove container image
 
 ```bash
-podman rmi ghcr.io/ecopelan/bjarne-validator:latest
+podman rmi ghcr.io/3rg0n/bjarne-validator:latest
 # or
-docker rmi ghcr.io/ecopelan/bjarne-validator:latest
+docker rmi ghcr.io/3rg0n/bjarne-validator:latest
 ```
