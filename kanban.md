@@ -29,6 +29,7 @@ _Last updated: 2025-12-03_
 | T-022 | GitHub Actions for cross-platform binaries | 2025-12-03 |
 | T-023 | GitHub Actions for container image | 2025-12-03 |
 | T-025 | Write installation documentation | 2025-12-03 |
+| T-026 | Add iteration limits / token budget | 2025-12-03 |
 | T-028 | Validate-only mode (--validate flag and /validate command) | 2025-12-03 |
 
 ---
@@ -74,11 +75,11 @@ All core workflow tasks completed (T-013, T-015, T-016 were implemented as part 
 | T-024 | Create GitHub Release workflow (on tag) | T-022, T-023 | ✓ Done (in release.yml) |
 | T-025 | Write installation documentation | T-024 | ✓ Done |
 
-### Phase 6: Polish (Low Priority)
+### Phase 6: Polish — COMPLETE
 
 | ID | Task | Dependencies | Status |
 |----|------|--------------|--------|
-| T-026 | Add iteration limits / token budget | T-014 | Pending |
+| T-026 | Add iteration limits / token budget | T-014 | ✓ Done |
 | T-027 | Model selection via env vars or flags | T-006 | ✓ Done (env vars work) |
 | T-028 | Validate-only mode (existing code) | T-010 | ✓ Done |
 
@@ -163,8 +164,8 @@ All core workflow tasks completed (T-013, T-015, T-016 were implemented as part 
 - [x] GitHub Actions for container image (container.yml)
 - [x] Installation documentation (T-025)
 
-**Phase 6: Polish** — MOSTLY COMPLETE
-- [ ] Iteration limits / token budget (T-026)
+**Phase 6: Polish** — COMPLETE
+- [x] Iteration limits / token budget (T-026)
 - [x] Model selection via env vars (BJARNE_MODEL)
 - [x] Validate-only mode (T-028)
 
