@@ -34,8 +34,8 @@ func main() {
 		}
 	}
 
-	// Start the REPL
-	if err := Run(); err != nil {
+	// Start the TUI
+	if err := StartTUI(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

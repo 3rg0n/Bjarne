@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:images.chainguard.dev)"
+      "Bash(golangci-lint run:*)",
+      "Bash(gofmt:*)",
+      "Bash(go test:*)",
+      "Bash(git commit:*)",
+      "Bash(podman build:*)",
+      "Bash(podman images:*)",
+      "WebFetch(domain:www.azquotes.com)",
+      "Bash(podman run:*)",
+      "Bash(MSYS_NO_PATHCONV=1 podman run:*)",
+      "Bash(go get:*)"
     ],
     "deny": [],
     "ask": []
