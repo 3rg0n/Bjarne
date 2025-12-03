@@ -15,6 +15,9 @@ _Last updated: 2025-12-02_
 | T-002 | Populate docs/project_state.md with initial state | 2025-12-02 |
 | T-003 | Record ADRs 001-007: Core architecture decisions | 2025-12-02 |
 | T-004 | Initialize Go module and project structure | 2025-12-02 |
+| T-005 | Implement interactive REPL loop (TTY interface) | 2025-12-02 |
+| T-006 | Add AWS Bedrock client with env var config | 2025-12-02 |
+| T-007 | Implement code generation prompt → Bedrock | 2025-12-02 |
 
 ---
 
@@ -28,14 +31,9 @@ _Last updated: 2025-12-02_
 
 ## Backlog
 
-### Phase 1: Foundation (High Priority)
+### Phase 1: Foundation — COMPLETE
 
-| ID | Task | Dependencies |
-|----|------|--------------|
-| T-004 | Initialize Go module and project structure | T-003 |
-| T-005 | Implement interactive REPL loop (TTY interface) | T-004 |
-| T-006 | Add AWS Bedrock client with env var config | T-004 |
-| T-007 | Implement code generation prompt → Bedrock | T-005, T-006 |
+All Phase 1 tasks completed. Ready for Phase 2 (Validation Container).
 
 ### Phase 2: Validation Container (High Priority)
 
@@ -125,14 +123,14 @@ _Last updated: 2025-12-02_
 
 ## Progress Summary
 
-**Phase 1: Foundation** (In Progress)
+**Phase 1: Foundation** — COMPLETE
 - [x] Project vision defined (T-001)
 - [x] Architecture decisions recorded (T-003)
 - [x] Go module initialized (T-004)
-- [ ] Interactive REPL (T-005) — basic structure done, needs Bedrock integration
-- [ ] Bedrock client (T-006)
+- [x] Interactive REPL with /commands (T-005)
+- [x] Bedrock client + code generation (T-006, T-007)
 
-**Phase 2: Validation** (Blocked by Phase 1)
+**Phase 2: Validation** (Next)
 - [ ] Dockerfile (T-008)
 - [ ] Container runtime (T-009)
 - [ ] Validation pipeline (T-010)

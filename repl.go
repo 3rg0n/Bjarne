@@ -2,29 +2,51 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 )
 
+// Session holds the state for a REPL session
+type Session struct {
+	bedrock       *BedrockClient
+	conversation  []Message
+	lastCode      string
+	lastValidated bool
+}
+
 // Run starts the interactive REPL loop
 func Run() error {
+	ctx := context.Background()
+
 	fmt.Printf("bjarne %s\n", Version)
 	fmt.Println("AI-assisted C/C++ code generation with mandatory validation")
+	fmt.Println()
+
+	// Initialize Bedrock client
+	fmt.Println("Connecting to AWS Bedrock...")
+	bedrock, err := NewBedrockClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to initialize Bedrock client: %w", err)
+	}
+	fmt.Printf("Using model: %s\n", bedrock.GetModelID())
+	fmt.Println()
 	fmt.Println("Type /help for commands, /quit to exit")
 	fmt.Println()
 
-	scanner := bufio.NewScanner(os.Stdin)
+	session := &Session{
+		bedrock:      bedrock,
+		conversation: []Message{},
+	}
 
-	// Conversation state
-	var lastGeneratedCode string
-	_ = lastGeneratedCode // Will be used when generation is implemented
+	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
 		fmt.Print("\033[94mYou:\033[0m ")
 
 		if !scanner.Scan() {
-			// EOF or error
 			break
 		}
 
@@ -35,15 +57,14 @@ func Run() error {
 
 		// Handle slash commands
 		if strings.HasPrefix(input, "/") {
-			if handleCommand(input, &lastGeneratedCode) {
-				continue
+			if !session.handleCommand(ctx, input) {
+				break
 			}
-			// If handleCommand returns false, it means /quit
-			break
+			continue
 		}
 
 		// Handle code generation request
-		if err := handlePrompt(input, &lastGeneratedCode); err != nil {
+		if err := session.handlePrompt(ctx, input); err != nil {
 			fmt.Fprintf(os.Stderr, "\033[91mError:\033[0m %v\n", err)
 		}
 	}
@@ -57,7 +78,7 @@ func Run() error {
 }
 
 // handleCommand processes slash commands, returns false if should quit
-func handleCommand(input string, lastCode *string) bool {
+func (s *Session) handleCommand(ctx context.Context, input string) bool {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
 		return true
@@ -77,19 +98,25 @@ func handleCommand(input string, lastCode *string) bool {
 			fmt.Println("\033[91mUsage:\033[0m /save <filename>")
 			return true
 		}
-		if *lastCode == "" {
+		if s.lastCode == "" {
 			fmt.Println("\033[91mNo code to save.\033[0m Generate code first.")
 			return true
 		}
+		if !s.lastValidated {
+			fmt.Println("\033[93mWarning:\033[0m Code has not passed validation yet.")
+			fmt.Println("         Saving anyway, but use at your own risk.")
+		}
 		filename := parts[1]
-		if err := saveToFile(filename, *lastCode); err != nil {
+		if err := saveToFile(filename, s.lastCode); err != nil {
 			fmt.Fprintf(os.Stderr, "\033[91mError saving:\033[0m %v\n", err)
 		} else {
 			fmt.Printf("\033[92mSaved to %s\033[0m\n", filename)
 		}
 
 	case "/clear", "/c":
-		// Clear conversation history (will be implemented with Bedrock integration)
+		s.conversation = []Message{}
+		s.lastCode = ""
+		s.lastValidated = false
 		fmt.Println("Conversation cleared.")
 
 	case "/validate", "/v":
@@ -98,8 +125,17 @@ func handleCommand(input string, lastCode *string) bool {
 			return true
 		}
 		filename := parts[1]
-		fmt.Printf("Validating %s... (not yet implemented)\n", filename)
-		// TODO: Implement validate-only mode
+		fmt.Printf("Validating %s... (not yet implemented - needs container)\n", filename)
+
+	case "/code", "/show":
+		if s.lastCode == "" {
+			fmt.Println("No code generated yet.")
+		} else {
+			fmt.Println("\n\033[93mLast generated code:\033[0m")
+			fmt.Println("```cpp")
+			fmt.Println(s.lastCode)
+			fmt.Println("```")
+		}
 
 	default:
 		fmt.Printf("\033[91mUnknown command:\033[0m %s\n", cmd)
@@ -116,6 +152,7 @@ Available Commands:
   /save <file>, /s       Save last generated code to file
   /clear, /c             Clear conversation history
   /validate <file>, /v   Validate existing file (without generation)
+  /code, /show           Show last generated code
   /quit, /q              Exit bjarne
 
 Tips:
@@ -126,19 +163,58 @@ Tips:
 }
 
 // handlePrompt processes a code generation request
-func handlePrompt(prompt string, lastCode *string) error {
+func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 	fmt.Println("\033[93mbjarne:\033[0m Generating...")
 
-	// TODO: Call Bedrock to generate code
-	// TODO: Validate generated code
-	// TODO: Iterate if validation fails
-	// TODO: Display validated code
+	// Add user message to conversation
+	s.conversation = append(s.conversation, Message{
+		Role:    "user",
+		Content: prompt,
+	})
 
-	// Placeholder response
-	fmt.Println("\033[93mbjarne:\033[0m Code generation not yet implemented.")
-	fmt.Println("       Waiting for T-006 (Bedrock client) and T-010 (validation pipeline)")
+	// Call Bedrock
+	response, err := s.bedrock.Generate(ctx, SystemPrompt, s.conversation)
+	if err != nil {
+		return fmt.Errorf("generation failed: %w", err)
+	}
+
+	// Add assistant response to conversation
+	s.conversation = append(s.conversation, Message{
+		Role:    "assistant",
+		Content: response,
+	})
+
+	// Extract code from response
+	code := extractCode(response)
+	if code != "" {
+		s.lastCode = code
+		s.lastValidated = false // Will be set to true after validation passes
+
+		fmt.Println("\n\033[93mGenerated code:\033[0m")
+		fmt.Println("```cpp")
+		fmt.Println(code)
+		fmt.Println("```")
+
+		// TODO: Run validation pipeline
+		fmt.Println("\n\033[93mValidation:\033[0m (not yet implemented - needs container)")
+		fmt.Println("Use /save <filename> to save the code")
+	} else {
+		// No code block found, just display response
+		fmt.Printf("\n\033[93mbjarne:\033[0m %s\n", response)
+	}
 
 	return nil
+}
+
+// extractCode extracts code from a markdown code block
+func extractCode(response string) string {
+	// Match ```cpp ... ``` or ```c ... ``` or ``` ... ```
+	re := regexp.MustCompile("(?s)```(?:cpp|c|c\\+\\+)?\\s*\\n(.*?)\\n```")
+	matches := re.FindStringSubmatch(response)
+	if len(matches) >= 2 {
+		return strings.TrimSpace(matches[1])
+	}
+	return ""
 }
 
 // saveToFile writes code to a file
