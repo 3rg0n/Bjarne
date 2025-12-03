@@ -184,7 +184,10 @@ func printCommandHelp() {
 	fmt.Println("")
 }
 
-// handlePrompt processes a code generation request
+// MaxIterations is the maximum number of validation attempts
+const MaxIterations = 3
+
+// handlePrompt processes a code generation request with automatic iteration
 func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 	fmt.Println("\033[93mbjarne:\033[0m Generating...")
 
@@ -208,9 +211,20 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 
 	// Extract code from response
 	code := extractCode(response)
-	if code != "" {
+	if code == "" {
+		// No code block found, just display response
+		fmt.Printf("\n\033[93mbjarne:\033[0m %s\n", response)
+		return nil
+	}
+
+	// Validation loop
+	for iteration := 1; iteration <= MaxIterations; iteration++ {
 		s.lastCode = code
 		s.lastValidated = false
+
+		if iteration > 1 {
+			fmt.Printf("\n\033[93mIteration %d/%d:\033[0m\n", iteration, MaxIterations)
+		}
 
 		fmt.Println("\n\033[93mGenerated code:\033[0m")
 		fmt.Println("```cpp")
@@ -222,28 +236,67 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		results, err := s.container.ValidateCode(ctx, code, "code.cpp")
 		if err != nil {
 			fmt.Printf("\033[91mValidation error:\033[0m %v\n", err)
-		} else {
-			fmt.Println(FormatResults(results))
+			return nil
+		}
 
-			// Check if all passed
-			allPassed := true
-			for _, r := range results {
-				if !r.Success {
-					allPassed = false
-					break
-				}
-			}
+		fmt.Println(FormatResults(results))
 
-			if allPassed {
-				s.lastValidated = true
-				fmt.Println("Use /save <filename> to save the validated code")
-			} else {
-				fmt.Println("\033[93mCode failed validation.\033[0m Ask me to fix the issues.")
+		// Check if all passed
+		allPassed := true
+		var failedErrors string
+		for _, r := range results {
+			if !r.Success {
+				allPassed = false
+				failedErrors += fmt.Sprintf("Stage %s failed:\n%s\n", r.Stage, r.Error)
 			}
 		}
-	} else {
-		// No code block found, just display response
-		fmt.Printf("\n\033[93mbjarne:\033[0m %s\n", response)
+
+		if allPassed {
+			s.lastValidated = true
+			fmt.Println("\033[92m✓ All validation passed!\033[0m")
+			fmt.Println("Use /save <filename> to save the validated code")
+			return nil
+		}
+
+		// Check if we have iterations left
+		if iteration >= MaxIterations {
+			fmt.Printf("\033[91mValidation failed after %d attempts.\033[0m\n", MaxIterations)
+			fmt.Println("You can manually ask me to fix specific issues.")
+			return nil
+		}
+
+		// Automatically iterate: ask Claude to fix the errors
+		fmt.Printf("\033[93mValidation failed. Attempting fix (%d/%d)...\033[0m\n", iteration+1, MaxIterations)
+
+		iterationPrompt := fmt.Sprintf(IterationPromptTemplate, failedErrors)
+
+		// Add iteration request to conversation
+		s.conversation = append(s.conversation, Message{
+			Role:    "user",
+			Content: iterationPrompt,
+		})
+
+		// Call Bedrock for fix
+		response, err = s.bedrock.Generate(ctx, SystemPrompt, s.conversation)
+		if err != nil {
+			return fmt.Errorf("iteration failed: %w", err)
+		}
+
+		// Add response to conversation
+		s.conversation = append(s.conversation, Message{
+			Role:    "assistant",
+			Content: response,
+		})
+
+		// Extract new code
+		newCode := extractCode(response)
+		if newCode == "" {
+			fmt.Println("\033[91mNo code in iteration response.\033[0m")
+			fmt.Printf("\n\033[93mbjarne:\033[0m %s\n", response)
+			return nil
+		}
+
+		code = newCode
 	}
 
 	return nil
