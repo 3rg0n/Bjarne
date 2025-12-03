@@ -44,6 +44,13 @@ type ClaudeResponse struct {
 	} `json:"usage"`
 }
 
+// GenerateResult contains the response text and token usage
+type GenerateResult struct {
+	Text         string
+	InputTokens  int
+	OutputTokens int
+}
+
 // NewBedrockClient creates a new Bedrock client with configuration from environment
 func NewBedrockClient(ctx context.Context) (*BedrockClient, error) {
 	// Load AWS config from environment/credentials
@@ -68,16 +75,25 @@ func NewBedrockClient(ctx context.Context) (*BedrockClient, error) {
 
 // Generate sends a prompt to Claude and returns the generated code
 func (b *BedrockClient) Generate(ctx context.Context, systemPrompt string, messages []Message) (string, error) {
+	result, err := b.GenerateWithTokens(ctx, systemPrompt, messages, 4096)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+// GenerateWithTokens sends a prompt and returns response with token usage
+func (b *BedrockClient) GenerateWithTokens(ctx context.Context, systemPrompt string, messages []Message, maxTokens int) (*GenerateResult, error) {
 	request := ClaudeRequest{
 		AnthropicVersion: "bedrock-2023-05-31",
-		MaxTokens:        4096,
+		MaxTokens:        maxTokens,
 		Messages:         messages,
 		System:           systemPrompt,
 	}
 
 	requestBody, err := json.Marshal(request)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	output, err := b.client.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
@@ -86,23 +102,27 @@ func (b *BedrockClient) Generate(ctx context.Context, systemPrompt string, messa
 		ContentType: aws.String("application/json"),
 	})
 	if err != nil {
-		return "", ErrBedrockInvoke(err)
+		return nil, ErrBedrockInvoke(err)
 	}
 
 	var response ClaudeResponse
 	if err := json.Unmarshal(output.Body, &response); err != nil {
-		return "", fmt.Errorf("failed to unmarshal response: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	// Extract text content from response
-	var result string
+	var text string
 	for _, content := range response.Content {
 		if content.Type == "text" {
-			result += content.Text
+			text += content.Text
 		}
 	}
 
-	return result, nil
+	return &GenerateResult{
+		Text:         text,
+		InputTokens:  response.Usage.InputTokens,
+		OutputTokens: response.Usage.OutputTokens,
+	}, nil
 }
 
 // GetModelID returns the configured model ID

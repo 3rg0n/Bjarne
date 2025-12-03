@@ -13,6 +13,8 @@ import (
 type Session struct {
 	bedrock       *BedrockClient
 	container     *ContainerRuntime
+	config        *Config
+	tokenTracker  *TokenTracker
 	conversation  []Message
 	lastCode      string
 	lastValidated bool
@@ -62,6 +64,9 @@ func handleFirstRunPull(ctx context.Context, container *ContainerRuntime) error 
 func Run() error {
 	ctx := context.Background()
 
+	// Load configuration
+	cfg := LoadConfig()
+
 	fmt.Printf("bjarne %s\n", Version)
 	fmt.Println("AI-assisted C/C++ code generation with mandatory validation")
 	fmt.Println()
@@ -102,6 +107,8 @@ func Run() error {
 	session := &Session{
 		bedrock:      bedrock,
 		container:    container,
+		config:       cfg,
+		tokenTracker: NewTokenTracker(cfg.MaxTotalTokens, cfg.WarnTokenThreshold),
 		conversation: []Message{},
 	}
 
@@ -181,7 +188,8 @@ func (s *Session) handleCommand(ctx context.Context, input string) bool {
 		s.conversation = []Message{}
 		s.lastCode = ""
 		s.lastValidated = false
-		fmt.Println("Conversation cleared.")
+		s.tokenTracker.Reset()
+		fmt.Println("Conversation and token budget cleared.")
 
 	case "/validate", "/v":
 		if len(parts) < 2 {
@@ -201,6 +209,21 @@ func (s *Session) handleCommand(ctx context.Context, input string) bool {
 			fmt.Println("```")
 		}
 
+	case "/tokens", "/t":
+		input, output, total := s.tokenTracker.GetUsage()
+		fmt.Printf("\n\033[93mToken Usage:\033[0m\n")
+		fmt.Printf("  Input tokens:  %d\n", input)
+		fmt.Printf("  Output tokens: %d\n", output)
+		fmt.Printf("  Total tokens:  %d\n", total)
+		if s.config.MaxTotalTokens > 0 {
+			remaining := s.config.MaxTotalTokens - total
+			pct := total * 100 / s.config.MaxTotalTokens
+			fmt.Printf("  Budget used:   %d%% (%d remaining)\n", pct, remaining)
+		} else {
+			fmt.Printf("  Budget:        unlimited\n")
+		}
+		fmt.Println()
+
 	default:
 		fmt.Printf("\033[91mUnknown command:\033[0m %s\n", cmd)
 		fmt.Println("Type /help for available commands.")
@@ -214,9 +237,10 @@ func printCommandHelp() {
 	fmt.Println("Available Commands:")
 	fmt.Println("  /help, /h              Show this help")
 	fmt.Println("  /save <file>, /s       Save last generated code to file")
-	fmt.Println("  /clear, /c             Clear conversation history")
+	fmt.Println("  /clear, /c             Clear conversation and token budget")
 	fmt.Println("  /validate <file>, /v   Validate existing file (without generation)")
 	fmt.Println("  /code, /show           Show last generated code")
+	fmt.Println("  /tokens, /t            Show token usage and budget")
 	fmt.Println("  /quit, /q              Exit bjarne")
 	fmt.Println("")
 	fmt.Println("Tips:")
@@ -225,9 +249,6 @@ func printCommandHelp() {
 	fmt.Println("  - Use /save to write validated code to a file")
 	fmt.Println("")
 }
-
-// MaxIterations is the maximum number of validation attempts
-const MaxIterations = 3
 
 // handlePrompt processes a code generation request with automatic iteration
 func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
@@ -239,33 +260,43 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		Content: prompt,
 	})
 
-	// Call Bedrock
-	response, err := s.bedrock.Generate(ctx, SystemPrompt, s.conversation)
+	// Call Bedrock with token tracking
+	result, err := s.bedrock.GenerateWithTokens(ctx, SystemPrompt, s.conversation, s.config.MaxTokens)
 	if err != nil {
 		return fmt.Errorf("generation failed: %w", err)
+	}
+
+	// Track tokens
+	ok, tokenMsg := s.tokenTracker.Add(result.InputTokens, result.OutputTokens)
+	if tokenMsg != "" {
+		fmt.Printf("\033[93m%s\033[0m\n", tokenMsg)
+	}
+	if !ok {
+		return fmt.Errorf("token budget exceeded")
 	}
 
 	// Add assistant response to conversation
 	s.conversation = append(s.conversation, Message{
 		Role:    "assistant",
-		Content: response,
+		Content: result.Text,
 	})
 
 	// Extract code from response
-	code := extractCode(response)
+	code := extractCode(result.Text)
 	if code == "" {
 		// No code block found, just display response
-		fmt.Printf("\n\033[93mbjarne:\033[0m %s\n", response)
+		fmt.Printf("\n\033[93mbjarne:\033[0m %s\n", result.Text)
 		return nil
 	}
 
-	// Validation loop
-	for iteration := 1; iteration <= MaxIterations; iteration++ {
+	// Validation loop with configurable max iterations
+	maxIter := s.config.MaxIterations
+	for iteration := 1; iteration <= maxIter; iteration++ {
 		s.lastCode = code
 		s.lastValidated = false
 
 		if iteration > 1 {
-			fmt.Printf("\n\033[93mIteration %d/%d:\033[0m\n", iteration, MaxIterations)
+			fmt.Printf("\n\033[93mIteration %d/%d:\033[0m\n", iteration, maxIter)
 		}
 
 		fmt.Println("\n\033[93mGenerated code:\033[0m")
@@ -301,14 +332,14 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 		}
 
 		// Check if we have iterations left
-		if iteration >= MaxIterations {
-			fmt.Printf("\033[91mValidation failed after %d attempts.\033[0m\n", MaxIterations)
+		if iteration >= maxIter {
+			fmt.Printf("\033[91mValidation failed after %d attempts.\033[0m\n", maxIter)
 			fmt.Println("You can manually ask me to fix specific issues.")
 			return nil
 		}
 
 		// Automatically iterate: ask Claude to fix the errors
-		fmt.Printf("\033[93mValidation failed. Attempting fix (%d/%d)...\033[0m\n", iteration+1, MaxIterations)
+		fmt.Printf("\033[93mValidation failed. Attempting fix (%d/%d)...\033[0m\n", iteration+1, maxIter)
 
 		iterationPrompt := fmt.Sprintf(IterationPromptTemplate, failedErrors)
 
@@ -318,23 +349,34 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 			Content: iterationPrompt,
 		})
 
-		// Call Bedrock for fix
-		response, err = s.bedrock.Generate(ctx, SystemPrompt, s.conversation)
+		// Call Bedrock for fix with token tracking
+		iterResult, err := s.bedrock.GenerateWithTokens(ctx, SystemPrompt, s.conversation, s.config.MaxTokens)
 		if err != nil {
 			return fmt.Errorf("iteration failed: %w", err)
+		}
+
+		// Track tokens
+		ok, tokenMsg := s.tokenTracker.Add(iterResult.InputTokens, iterResult.OutputTokens)
+		if tokenMsg != "" {
+			fmt.Printf("\033[93m%s\033[0m\n", tokenMsg)
+		}
+		if !ok {
+			fmt.Println("\033[91mToken budget exceeded during iteration.\033[0m")
+			fmt.Println("Use /clear to start a new conversation.")
+			return nil
 		}
 
 		// Add response to conversation
 		s.conversation = append(s.conversation, Message{
 			Role:    "assistant",
-			Content: response,
+			Content: iterResult.Text,
 		})
 
 		// Extract new code
-		newCode := extractCode(response)
+		newCode := extractCode(iterResult.Text)
 		if newCode == "" {
 			fmt.Println("\033[91mNo code in iteration response.\033[0m")
-			fmt.Printf("\n\033[93mbjarne:\033[0m %s\n", response)
+			fmt.Printf("\n\033[93mbjarne:\033[0m %s\n", iterResult.Text)
 			return nil
 		}
 

@@ -141,6 +141,9 @@ Environment Variables:
   AWS_REGION              AWS region (default: us-east-1)
   BJARNE_MODEL            Claude model ID (default: uses inference profile)
   BJARNE_VALIDATOR_IMAGE  Custom validator container image
+  BJARNE_MAX_ITERATIONS   Max validation retry attempts (default: 3)
+  BJARNE_MAX_TOKENS       Max tokens per response (default: 8192)
+  BJARNE_MAX_TOTAL_TOKENS Session token budget (default: 150000, 0=unlimited)
 
 Examples:
   # Interactive mode
