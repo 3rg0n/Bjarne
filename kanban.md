@@ -18,6 +18,9 @@ _Last updated: 2025-12-02_
 | T-005 | Implement interactive REPL loop (TTY interface) | 2025-12-02 |
 | T-006 | Add AWS Bedrock client with env var config | 2025-12-02 |
 | T-007 | Implement code generation prompt → Bedrock | 2025-12-02 |
+| T-008 | Create Dockerfile with Clang 18+ and sanitizers | 2025-12-02 |
+| T-009 | Implement container runtime detection (podman/docker) | 2025-12-02 |
+| T-010 | Implement validation pipeline (clang-tidy → ASAN → UBSAN → TSAN) | 2025-12-02 |
 
 ---
 
@@ -85,6 +88,13 @@ All Phase 1 tasks completed. Ready for Phase 2 (Validation Container).
 
 ## Icebox (Future Considerations)
 
+### Security & Quality
+| ID | Task | Notes |
+|----|------|-------|
+| T-029 | Integrate llm-guard for prompt scanning | Prompt injection, secrets, toxicity detection |
+| T-030 | Integrate codeguard safe-c-functions rules into system prompt | Ban unsafe functions |
+| T-031 | Add toolchain hardening flags to validation container | -fstack-protector-all, PIE, RELRO |
+
 ### Core Enhancements
 | ID | Task | Notes |
 |----|------|-------|
@@ -130,10 +140,10 @@ All Phase 1 tasks completed. Ready for Phase 2 (Validation Container).
 - [x] Interactive REPL with /commands (T-005)
 - [x] Bedrock client + code generation (T-006, T-007)
 
-**Phase 2: Validation** (Next)
-- [ ] Dockerfile (T-008)
-- [ ] Container runtime (T-009)
-- [ ] Validation pipeline (T-010)
+**Phase 2: Validation** — COMPLETE
+- [x] Dockerfile with Wolfi + Ubuntu fallback (T-008)
+- [x] Container runtime detection (T-009)
+- [x] Validation pipeline integration (T-010)
 
 **Phase 3: Core Workflow** (Blocked by Phase 2)
 - [ ] Full flow integration (T-013)

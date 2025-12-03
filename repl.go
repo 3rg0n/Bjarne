@@ -12,6 +12,7 @@ import (
 // Session holds the state for a REPL session
 type Session struct {
 	bedrock       *BedrockClient
+	container     *ContainerRuntime
 	conversation  []Message
 	lastCode      string
 	lastValidated bool
@@ -23,6 +24,26 @@ func Run() error {
 
 	fmt.Printf("bjarne %s\n", Version)
 	fmt.Println("AI-assisted C/C++ code generation with mandatory validation")
+	fmt.Println()
+
+	// Initialize container runtime
+	fmt.Println("Detecting container runtime...")
+	container, err := DetectContainerRuntime()
+	if err != nil {
+		return fmt.Errorf("failed to detect container runtime: %w", err)
+	}
+	fmt.Printf("Using container runtime: %s\n", container.GetBinary())
+
+	// Check if validation image exists
+	if !container.ImageExists(ctx) {
+		fmt.Printf("Validation container not found. Pull %s? [Y/n] ", container.imageName)
+		// For now, auto-pull (can make interactive later)
+		fmt.Println("Pulling...")
+		if err := container.PullImage(ctx); err != nil {
+			fmt.Printf("\033[93mWarning:\033[0m Could not pull image: %v\n", err)
+			fmt.Println("         Validation will be skipped until container is available.")
+		}
+	}
 	fmt.Println()
 
 	// Initialize Bedrock client
@@ -38,6 +59,7 @@ func Run() error {
 
 	session := &Session{
 		bedrock:      bedrock,
+		container:    container,
 		conversation: []Message{},
 	}
 
@@ -188,16 +210,37 @@ func (s *Session) handlePrompt(ctx context.Context, prompt string) error {
 	code := extractCode(response)
 	if code != "" {
 		s.lastCode = code
-		s.lastValidated = false // Will be set to true after validation passes
+		s.lastValidated = false
 
 		fmt.Println("\n\033[93mGenerated code:\033[0m")
 		fmt.Println("```cpp")
 		fmt.Println(code)
 		fmt.Println("```")
 
-		// TODO: Run validation pipeline
-		fmt.Println("\n\033[93mValidation:\033[0m (not yet implemented - needs container)")
-		fmt.Println("Use /save <filename> to save the code")
+		// Run validation pipeline
+		fmt.Println("\n\033[93mValidating...\033[0m")
+		results, err := s.container.ValidateCode(ctx, code, "code.cpp")
+		if err != nil {
+			fmt.Printf("\033[91mValidation error:\033[0m %v\n", err)
+		} else {
+			fmt.Println(FormatResults(results))
+
+			// Check if all passed
+			allPassed := true
+			for _, r := range results {
+				if !r.Success {
+					allPassed = false
+					break
+				}
+			}
+
+			if allPassed {
+				s.lastValidated = true
+				fmt.Println("Use /save <filename> to save the validated code")
+			} else {
+				fmt.Println("\033[93mCode failed validation.\033[0m Ask me to fix the issues.")
+			}
+		}
 	} else {
 		// No code block found, just display response
 		fmt.Printf("\n\033[93mbjarne:\033[0m %s\n", response)
