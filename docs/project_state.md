@@ -31,7 +31,7 @@ _Last updated: 2025-12-02_
 | ADR-001 | Fail-fast sequential validation pipeline |
 | ADR-002 | Docker-based hermetic validation |
 | ADR-003 | Go implementation stack |
-| ADR-004 | Agent-based architecture with **mandatory** validation |
+| ADR-004 | CLI-orchestrated pipeline with **mandatory** validation |
 | ADR-005 | Podman primary, Docker fallback |
 | ADR-006 | GitHub Registry distribution (ghcr.io) |
 | ADR-007 | Development in WSL2 on Windows 11 |
@@ -43,7 +43,7 @@ _Last updated: 2025-12-02_
 - **AI Integration:** AWS Bedrock with Claude models
   - Model IDs from environment variables
   - `global.` prefix for inference profiles
-- **Architecture:** Agent-based with **mandatory validation** (not optional)
+- **Architecture:** CLI-orchestrated pipeline with **mandatory validation**
 - **Distribution:** GitHub Releases (binaries) + ghcr.io (container)
 
 ## Known Risks / Issues
@@ -101,31 +101,59 @@ bjarne/
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        bjarne CLI                           │
-│                      (Go single binary)                     │
-├─────────────────────────────────────────────────────────────┤
-│  Agent Loop                                                 │
-│  ┌─────────┐    ┌──────────────┐    ┌─────────────────────┐│
-│  │  User   │───▶│    Claude    │───▶│       Tools         ││
-│  │ Prompt  │    │  (Bedrock)   │    │  read_file          ││
-│  └─────────┘    └──────────────┘    │  list_files         ││
-│       ▲                │            │  edit_file          ││
-│       │                │            │  validate_code ─────┼┼──┐
-│       │                ▼            │  write_output       ││  │
-│       └────────────────────────────┘└─────────────────────┘│  │
-└─────────────────────────────────────────────────────────────┘  │
-                                                                 │
-┌─────────────────────────────────────────────────────────────┐  │
-│              bjarne-validator Container                     │◀─┘
-│                    (ghcr.io)                                │
-├─────────────────────────────────────────────────────────────┤
-│  • Clang 18+ (clang++, clang-tidy)                         │
-│  • AddressSanitizer (ASAN)                                 │
-│  • UndefinedBehaviorSanitizer (UBSAN)                      │
-│  • ThreadSanitizer (TSAN)                                  │
-│  • MemorySanitizer (MSAN) — Linux only                     │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         bjarne CLI                              │
+│                    (Go single binary, TTY UI)                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌──────────────────────────────────────────────────────────┐  │
+│   │                   Interactive REPL                        │  │
+│   │   You: write a thread-safe counter                       │  │
+│   │   bjarne: Generating... Validating... ✓                  │  │
+│   │   [code displayed]                                       │  │
+│   │   You: /save counter.cpp                                 │  │
+│   └──────────────────────────────────────────────────────────┘  │
+│                            │                                    │
+│              ┌─────────────┴─────────────┐                     │
+│              ▼                           ▼                     │
+│   ┌──────────────────┐        ┌──────────────────────┐        │
+│   │  Bedrock Client  │        │  Validation Pipeline  │        │
+│   │  (Claude models) │        │  (Container orchestr) │        │
+│   └──────────────────┘        └──────────────────────┘        │
+│                                          │                     │
+└──────────────────────────────────────────┼─────────────────────┘
+                                           │
+                                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   bjarne-validator Container                    │
+│                         (ghcr.io)                               │
+├─────────────────────────────────────────────────────────────────┤
+│  Pipeline: clang-tidy → compile → ASAN → UBSAN → [TSAN] → run  │
+│                                                                 │
+│  • Clang 18+ (clang++, clang-tidy)                             │
+│  • AddressSanitizer (ASAN)                                     │
+│  • UndefinedBehaviorSanitizer (UBSAN)                          │
+│  • ThreadSanitizer (TSAN) — if threads detected                │
+│  • MemorySanitizer (MSAN) — Linux only                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Flow:**
+```
+User Prompt
+    │
+    ▼
+bjarne calls Bedrock (Claude generates code)
+    │
+    ▼
+bjarne runs validation pipeline in container
+    │
+    ├── FAIL → bjarne sends errors back to Claude → iterate
+    │
+    └── PASS → bjarne displays validated code to user
+                    │
+                    ▼
+              User: /save filename.cpp
 ```
 
 ## User Flow

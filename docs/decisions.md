@@ -96,71 +96,65 @@ Use **Go** for the entire implementation.
 
 ---
 
-## [2025-12-02] ADR-004: Agent-Based Architecture with Mandatory Validation
+## [2025-12-02] ADR-004: CLI-Orchestrated Pipeline with Mandatory Validation
 
 **Context:**
-Originally planned a sequential pipeline where we orchestrate: generate → validate → feedback → iterate. After reviewing Amp's architecture, a simpler agent pattern emerged. However, unlike Amp where tool use is optional, **validation in bjarne is mandatory** — code must pass all gates before being presented to the user.
+bjarne needs to generate C/C++ code and validate it before presenting to users. The key architectural question: who orchestrates the flow — an agent (Claude decides) or the CLI (bjarne decides)?
 
 **Decision:**
-Implement bjarne as an **agent with mandatory validation**. Claude handles code generation and iteration, but the system **enforces** validation before any code can be returned to the user.
+Implement bjarne as a **CLI tool that orchestrates the entire flow**. bjarne controls when to call Bedrock, when to validate, and when to iterate. Claude's role is purely code generation.
 
-**Key Constraint:** Validation is NOT optional. The system must:
-1. Intercept any code Claude generates
-2. Run it through all validation gates
-3. Only present validated code to the user
-4. Force iteration on validation failures
+**Key Principle:** bjarne is the orchestrator, not Claude. Validation is mandatory and controlled by bjarne.
 
-**Core Tools:**
-1. `read_file` — Read existing code files
-2. `list_files` — Explore codebase structure
-3. `edit_file` — Create/modify code (string replacement)
-4. `validate_code` — **MANDATORY** — Run validation gates, return structured errors
-5. `write_output` — Write approved code to user-specified file (only after validation passes)
-
-**Enforcement Mechanism:**
-- System prompt instructs Claude that ALL generated code MUST be validated
-- `write_output` tool checks validation status — refuses to write unvalidated code
-- Consider: intercept code blocks in Claude's response and auto-validate
-
-**Flow:**
+**Architecture:**
 ```
-User: "write a thread-safe counter in C++"
+User Prompt (REPL)
        ↓
-Claude: generates code, MUST call validate_code (enforced by system prompt)
+bjarne sends prompt to Bedrock → Claude generates code
        ↓
-Tool: runs clang-tidy, ASAN, UBSAN, TSAN → returns errors
+bjarne extracts code from response
        ↓
-Claude: sees errors, fixes code, calls validate_code again (mandatory)
+bjarne runs validation pipeline in container
        ↓
-Tool: all gates pass → returns success with validation token
-       ↓
-Claude: presents VALIDATED code to user, asks if they want to save
-       ↓
-User: "yes, save to counter.cpp"
-       ↓
-Claude: calls write_output (checks validation token)
+   ├── FAIL → bjarne sends errors + code back to Claude → iterate
+   │
+   └── PASS → bjarne displays validated code to user
+                   ↓
+             User: /save filename.cpp
 ```
+
+**Why CLI Orchestration (not Agent):**
+1. **Predictable behavior** — bjarne always validates, no prompt engineering needed
+2. **Simpler implementation** — No tool definitions, no tool execution parsing
+3. **Better UX** — bjarne controls the display, progress indicators, etc.
+4. **Mandatory validation** — Cannot be bypassed by prompt injection
+
+**User Interface:**
+- Interactive REPL (TTY-style, like Claude Code)
+- Future: `/` command menu (/save, /help, /validate, /clear)
+- Colored output for code, errors, status
 
 **Alternatives Considered:**
-- **Optional validation (Amp style)** — Rejected: Defeats the core purpose of bjarne
-- **Full pipeline orchestration** — Rejected: Unnecessary complexity if we enforce via system prompt
-- **Post-response validation** — Considered: Intercept Claude's response and validate any code blocks automatically
+- **Agent with tools** — Rejected: Adds complexity, validation could be bypassed
+- **Single-shot CLI** — Rejected: Users want interactive refinement
+- **Web UI** — Rejected for MVP: CLI first, web later
 
 **Consequences:**
-- **Positive:** Guarantees all returned code passes validation
-- **Positive:** Still leverages Claude's iteration intelligence
-- **Positive:** Clear separation: Claude generates, system validates
-- **Negative:** System prompt must be carefully crafted to enforce validation
-- **Follow-up:** Design system prompt that makes validation non-negotiable
+- **Positive:** Full control over validation flow
+- **Positive:** Simpler Go implementation (no tool protocol)
+- **Positive:** Better UX with progress indicators
+- **Positive:** Validation cannot be bypassed
+- **Negative:** Less flexible (Claude can't explore filesystem, etc.)
+- **Follow-up:** Design REPL loop and `/` command system
 
 **Future Extensibility:**
-The validation system is designed to be extensible. Future validation types:
+The validation pipeline is designed to be extensible. Future validation domains:
 - **Game Development:** Frame timing, memory budget, shader compilation
 - **High-Frequency Trading:** Latency checks (p55/p75/p99), lock-free verification
 - **Embedded Systems:** Stack size, interrupt safety, real-time constraints
 - **Security:** Fuzzing, static security analysis, input validation
 
-Each domain can add its own validation gates while keeping the core mandatory validation architecture.
+Each domain can add its own validation gates to the pipeline.
 
 ---
 

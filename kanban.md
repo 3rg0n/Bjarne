@@ -32,49 +32,55 @@ _Last updated: 2025-12-02_
 | ID | Task | Dependencies |
 |----|------|--------------|
 | T-004 | Initialize Go module and project structure | T-003 |
-| T-005 | Implement basic agent loop (Amp pattern) | T-004 |
+| T-005 | Implement interactive REPL loop (TTY interface) | T-004 |
 | T-006 | Add AWS Bedrock client with env var config | T-004 |
-| T-007 | Implement `read_file` tool | T-005 |
-| T-008 | Implement `list_files` tool | T-005 |
-| T-009 | Implement `edit_file` tool | T-005 |
+| T-007 | Implement code generation prompt → Bedrock | T-005, T-006 |
 
 ### Phase 2: Validation Container (High Priority)
 
 | ID | Task | Dependencies |
 |----|------|--------------|
-| T-010 | Create Dockerfile with Clang 18+ and sanitizers | T-004 |
-| T-011 | Implement container runtime detection (podman/docker) | T-004 |
-| T-012 | Implement `validate_code` tool (orchestrates container) | T-010, T-011 |
-| T-013 | Parse clang-tidy output for AI consumption | T-012 |
-| T-014 | Parse sanitizer output (ASAN/UBSAN/TSAN) for AI | T-012 |
+| T-008 | Create Dockerfile with Clang 18+ and sanitizers | T-004 |
+| T-009 | Implement container runtime detection (podman/docker) | T-004 |
+| T-010 | Implement validation pipeline (clang-tidy → compile → ASAN → UBSAN → TSAN) | T-008, T-009 |
+| T-011 | Parse clang-tidy output for display | T-010 |
+| T-012 | Parse sanitizer output (ASAN/UBSAN/TSAN) for display | T-010 |
 
-### Phase 3: User Experience (Medium Priority)
+### Phase 3: Core Workflow (High Priority)
 
 | ID | Task | Dependencies |
 |----|------|--------------|
-| T-015 | Implement `write_output` tool (save to file) | T-009 |
-| T-016 | Add system prompt for C/C++ code generation | T-005 |
-| T-017 | First-run container pull experience | T-011 |
+| T-013 | Integrate generation → validation → display flow | T-007, T-010 |
+| T-014 | Implement iteration loop (validation fails → re-generate) | T-013 |
+| T-015 | Implement "save to file" command | T-013 |
+| T-016 | Add system prompt for C/C++ code generation | T-007 |
+
+### Phase 4: User Experience (Medium Priority)
+
+| ID | Task | Dependencies |
+|----|------|--------------|
+| T-017 | First-run container pull experience | T-009 |
 | T-018 | Add --version and --help flags | T-004 |
 | T-019 | Error handling and user-friendly messages | T-005 |
+| T-020 | Colored terminal output | T-005 |
+| T-021 | Add `/` command menu (future: /help, /save, /validate, /clear) | T-005 |
 
-### Phase 4: Distribution (Medium Priority)
-
-| ID | Task | Dependencies |
-|----|------|--------------|
-| T-020 | GitHub Actions: Build cross-platform binaries | T-018 |
-| T-021 | GitHub Actions: Build and push container to ghcr.io | T-010 |
-| T-022 | Create GitHub Release workflow (on tag) | T-020, T-021 |
-| T-023 | Write installation documentation | T-022 |
-
-### Phase 5: Polish (Low Priority)
+### Phase 5: Distribution (Medium Priority)
 
 | ID | Task | Dependencies |
 |----|------|--------------|
-| T-024 | Add iteration limits / token budget | T-012 |
-| T-025 | Model selection via env vars or flags | T-006 |
-| T-026 | Validate-only mode (existing code) | T-012 |
-| T-027 | Colored terminal output | T-005 |
+| T-022 | GitHub Actions: Build cross-platform binaries | T-018 |
+| T-023 | GitHub Actions: Build and push container to ghcr.io | T-008 |
+| T-024 | Create GitHub Release workflow (on tag) | T-022, T-023 |
+| T-025 | Write installation documentation | T-024 |
+
+### Phase 6: Polish (Low Priority)
+
+| ID | Task | Dependencies |
+|----|------|--------------|
+| T-026 | Add iteration limits / token budget | T-014 |
+| T-027 | Model selection via env vars or flags | T-006 |
+| T-028 | Validate-only mode (existing code) | T-010 |
 
 ---
 
@@ -122,52 +128,77 @@ _Last updated: 2025-12-02_
 - [x] Project vision defined (T-001)
 - [x] Architecture decisions recorded (T-003)
 - [ ] Go module initialized (T-004)
-- [ ] Basic agent loop (T-005)
-- [ ] Core tools (T-007, T-008, T-009)
+- [ ] Interactive REPL (T-005)
+- [ ] Bedrock client (T-006)
 
 **Phase 2: Validation** (Blocked by Phase 1)
-- [ ] Dockerfile (T-010)
-- [ ] Container runtime (T-011)
-- [ ] validate_code tool (T-012)
+- [ ] Dockerfile (T-008)
+- [ ] Container runtime (T-009)
+- [ ] Validation pipeline (T-010)
 
-**Phase 3: UX** (Blocked by Phase 2)
-- [ ] write_output tool (T-015)
-- [ ] System prompt (T-016)
-
-**Phase 4: Distribution** (Blocked by Phase 3)
-- [ ] Cross-platform builds (T-020)
-- [ ] ghcr.io container (T-021)
+**Phase 3: Core Workflow** (Blocked by Phase 2)
+- [ ] Full flow integration (T-013)
+- [ ] Iteration loop (T-014)
+- [ ] Save command (T-015)
 
 ---
 
 ## Architecture Summary
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        bjarne CLI                           │
-│                      (Go single binary)                     │
-├─────────────────────────────────────────────────────────────┤
-│  Agent Loop (Amp pattern)                                   │
-│  ┌─────────┐    ┌──────────────┐    ┌─────────────────────┐│
-│  │  User   │───▶│    Claude    │───▶│       Tools         ││
-│  │ Prompt  │    │  (Bedrock)   │    │  read_file          ││
-│  └─────────┘    └──────────────┘    │  list_files         ││
-│       ▲                │            │  edit_file          ││
-│       │                │            │  validate_code ─────┼┼──┐
-│       │                ▼            │  write_output       ││  │
-│       └────────────────────────────┘└─────────────────────┘│  │
-└─────────────────────────────────────────────────────────────┘  │
-                                                                 │
-┌─────────────────────────────────────────────────────────────┐  │
-│              bjarne-validator Container                     │◀─┘
-│                    (ghcr.io)                                │
-├─────────────────────────────────────────────────────────────┤
-│  • Clang 18+ (clang++, clang-tidy)                         │
-│  • AddressSanitizer (ASAN)                                 │
-│  • UndefinedBehaviorSanitizer (UBSAN)                      │
-│  • ThreadSanitizer (TSAN)                                  │
-│  • MemorySanitizer (MSAN) — Linux only                     │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         bjarne CLI                              │
+│                    (Go single binary, TTY UI)                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌──────────────────────────────────────────────────────────┐  │
+│   │                   Interactive REPL                        │  │
+│   │   You: write a thread-safe counter                       │  │
+│   │   bjarne: Generating... Validating... ✓                  │  │
+│   │   [code displayed]                                       │  │
+│   │   You: /save counter.cpp                                 │  │
+│   └──────────────────────────────────────────────────────────┘  │
+│                            │                                    │
+│              ┌─────────────┴─────────────┐                     │
+│              ▼                           ▼                     │
+│   ┌──────────────────┐        ┌──────────────────────┐        │
+│   │  Bedrock Client  │        │  Validation Pipeline  │        │
+│   │  (Claude models) │        │  (Container orchestr) │        │
+│   └──────────────────┘        └──────────────────────┘        │
+│                                          │                     │
+└──────────────────────────────────────────┼─────────────────────┘
+                                           │
+                                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   bjarne-validator Container                    │
+│                         (ghcr.io)                               │
+├─────────────────────────────────────────────────────────────────┤
+│  Pipeline: clang-tidy → compile → ASAN → UBSAN → [TSAN] → run  │
+│                                                                 │
+│  • Clang 18+ (clang++, clang-tidy)                             │
+│  • AddressSanitizer (ASAN)                                     │
+│  • UndefinedBehaviorSanitizer (UBSAN)                          │
+│  • ThreadSanitizer (TSAN) — if threads detected                │
+│  • MemorySanitizer (MSAN) — Linux only                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Flow:**
+```
+User Prompt
+    │
+    ▼
+bjarne calls Bedrock (Claude generates code)
+    │
+    ▼
+bjarne runs validation pipeline in container
+    │
+    ├── FAIL → bjarne sends errors back to Claude → iterate
+    │
+    └── PASS → bjarne displays validated code to user
+                    │
+                    ▼
+              User: /save filename.cpp
 ```
 
 ---

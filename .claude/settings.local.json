@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:ampcode.com)"
+      "WebFetch(domain:ampcode.com)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nT-000 through T-003: Project foundation and planning phase complete\n\nEstablished bjarne as an AI-assisted C/C++ code generation and validation tool.\nNamed in honor of Bjarne Stroustrup — helping \"the smaller, cleaner language\" emerge.\n\nCore Architecture Decisions (7 ADRs):\n- ADR-001: Fail-fast sequential validation pipeline (clang-tidy → ASAN → UBSAN → TSAN)\n- ADR-002: Docker-based hermetic validation (isolated, reproducible)\n- ADR-003: Go implementation stack (single binary, proven Amp pattern)\n- ADR-004: Agent-based architecture with MANDATORY validation (not optional)\n- ADR-005: Podman primary, Docker fallback (daemonless, rootless)\n- ADR-006: GitHub Registry distribution (ghcr.io + releases)\n- ADR-007: Development in WSL2 on Windows 11\n\nKey Design Principle:\nValidation is NOT optional. All generated code MUST pass validation gates\nbefore being presented to the user. Claude generates, system validates.\n\nBacklog established:\n- 24 tasks across 5 phases (Foundation → Validation → UX → Distribution → Polish)\n- Future extensibility for domain-specific validation (HFT, Game Dev, Embedded, Security)\n\nFiles:\n- CLAUDE.md: AI guidance with mandatory commit rules\n- kanban.md: Full backlog with architecture diagram\n- docs/readme.md: Project vision and scope\n- docs/project_state.md: Current state and target architecture\n- docs/decisions.md: 7 ADRs documenting architectural choices\n- amp.agent.md: Reference implementation from Amp (Go agent pattern)\n- concept files: Initial brainstorming\n\nSee: kanban.md for full backlog\n\n🤖 Generated with Claude Code (claude.ai/code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []
