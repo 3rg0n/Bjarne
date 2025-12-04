@@ -780,17 +780,23 @@ func (m *Model) startFix() (Model, tea.Cmd) {
 	modelName := shortModelName(currentModel)
 
 	// Track which models we've used
-	if m.currentIteration == 0 || len(m.modelsUsed) == 0 || m.modelsUsed[len(m.modelsUsed)-1] != modelName {
+	if len(m.modelsUsed) == 0 || m.modelsUsed[len(m.modelsUsed)-1] != modelName {
 		m.modelsUsed = append(m.modelsUsed, modelName)
 	}
 
+	// Display attempt number (currentIteration is already 1-based after advanceEscalation)
+	attemptNum := m.currentIteration
+	if attemptNum == 0 {
+		attemptNum = 1 // After escalation, iteration resets to 0 but this is attempt 1 with new model
+	}
+
 	m.state = StateFixing
-	m.statusMsg = fmt.Sprintf("Fixing with %s (attempt %d)…", modelName, m.currentIteration+1)
+	m.statusMsg = fmt.Sprintf("Fixing with %s (attempt %d)…", modelName, attemptNum)
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
 	m.addOutput("")
-	m.addOutput(m.styles.Warning.Render(fmt.Sprintf("Attempting fix with %s (attempt %d)...", modelName, m.currentIteration+1)))
+	m.addOutput(m.styles.Warning.Render(fmt.Sprintf("Attempting fix with %s (attempt %d)...", modelName, attemptNum)))
 
 	// Add fix request to conversation
 	fixPrompt := fmt.Sprintf(IterationPromptTemplate, m.lastValidationErrs)
