@@ -49,18 +49,6 @@ func handleFirstRunPull(ctx context.Context, container *ContainerRuntime) error 
 	return nil
 }
 
-// truncateError truncates an error message to maxLen characters
-func truncateError(err string, maxLen int) string {
-	// Get first line only
-	if idx := strings.Index(err, "\n"); idx > 0 {
-		err = err[:idx]
-	}
-	if len(err) > maxLen {
-		return err[:maxLen-3] + "..."
-	}
-	return err
-}
-
 // parseDifficulty extracts the difficulty tag from bjarne's reflection
 // Returns the difficulty level (EASY, MEDIUM, COMPLEX) and the text without the tag
 func parseDifficulty(text string) (string, string) {

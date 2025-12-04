@@ -177,6 +177,66 @@ func TestFormatDiagnosticsEmpty(t *testing.T) {
 	}
 }
 
+func TestFormatDiagnosticsForLLM(t *testing.T) {
+	diags := []Diagnostic{
+		{
+			File:    "/src/code.cpp",
+			Line:    15,
+			Column:  3,
+			Level:   LevelWarning,
+			Message: "use nullptr instead of NULL",
+			Check:   "modernize-use-nullptr",
+		},
+		{
+			File:    "/src/code.cpp",
+			Line:    23,
+			Column:  1,
+			Level:   LevelError,
+			Message: "undeclared identifier 'foo'",
+			Check:   "",
+		},
+	}
+
+	output := FormatDiagnosticsForLLM(diags)
+
+	// Should strip /src/ prefix
+	if strings.Contains(output, "/src/") {
+		t.Error("FormatDiagnosticsForLLM should strip /src/ prefix")
+	}
+
+	// Should contain file:line format
+	if !strings.Contains(output, "code.cpp:15") {
+		t.Error("FormatDiagnosticsForLLM missing 'code.cpp:15'")
+	}
+
+	// Should contain check name
+	if !strings.Contains(output, "modernize-use-nullptr:") {
+		t.Error("FormatDiagnosticsForLLM missing check name")
+	}
+
+	// Should contain message
+	if !strings.Contains(output, "use nullptr instead of NULL") {
+		t.Error("FormatDiagnosticsForLLM missing message")
+	}
+
+	// Should NOT contain ANSI color codes
+	if strings.Contains(output, "\033[") {
+		t.Error("FormatDiagnosticsForLLM should not contain ANSI color codes")
+	}
+
+	// For error without check name, should use level as prefix
+	if !strings.Contains(output, "error:") {
+		t.Error("FormatDiagnosticsForLLM should fall back to level when no check name")
+	}
+}
+
+func TestFormatDiagnosticsForLLMEmpty(t *testing.T) {
+	output := FormatDiagnosticsForLLM(nil)
+	if output != "" {
+		t.Errorf("FormatDiagnosticsForLLM(nil) = %q, want empty", output)
+	}
+}
+
 func TestIntToStr(t *testing.T) {
 	tests := []struct {
 		input    int

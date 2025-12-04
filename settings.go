@@ -19,6 +19,8 @@ type Settings struct {
 type ModelSettings struct {
 	// Chat is used for conversational responses (no code generation)
 	Chat string `json:"chat"`
+	// Reflection is used for initial prompt analysis (classifies EASY/MEDIUM/COMPLEX)
+	Reflection string `json:"reflection"`
 	// Generate is used for initial code generation
 	Generate string `json:"generate"`
 	// Oracle is used for deep architectural analysis (COMPLEX tasks)
@@ -69,12 +71,13 @@ type ThemePreset struct {
 func DefaultSettings() *Settings {
 	return &Settings{
 		Models: ModelSettings{
-			Chat:     "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-			Generate: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-			Oracle:   "global.anthropic.claude-opus-4-5-20251101-v1:0",
+			Chat:       "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+			Reflection: "global.anthropic.claude-haiku-4-5-20251001-v1:0", // Haiku for quick classification
+			Generate:   "global.anthropic.claude-haiku-4-5-20251001-v1:0", // Default gen (overridden by complexity)
+			Oracle:     "global.anthropic.claude-opus-4-5-20251101-v1:0",  // Opus for COMPLEX
 			Escalation: []string{
-				"global.anthropic.claude-sonnet-4-5-20250929-v1:0",
-				"global.anthropic.claude-opus-4-5-20251101-v1:0",
+				"global.anthropic.claude-sonnet-4-5-20250929-v1:0", // Haiku → Sonnet
+				"global.anthropic.claude-opus-4-5-20251101-v1:0",   // Sonnet → Opus
 			},
 		},
 		Validation: ValidationSettings{

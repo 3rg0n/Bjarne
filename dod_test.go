@@ -172,10 +172,10 @@ func TestGenerateBenchmarkHarness(t *testing.T) {
 
 func TestParseProperties(t *testing.T) {
 	tests := []struct {
-		name       string
-		response   string
-		wantProps  []string
-		wantCount  int
+		name      string
+		response  string
+		wantProps []string
+		wantCount int
 	}{
 		{
 			name:      "roundtrip property",

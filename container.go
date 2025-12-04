@@ -218,8 +218,9 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 	}
 
 	// Stage 1: clang-tidy (static analysis)
+	// -quiet removes system header noise, focusing on user code issues
 	result := runStage("clang-tidy",
-		"clang-tidy", "-header-filter=.*", "/src/"+filename, "--", "-std=c++17", "-Wall", "-Wextra")
+		"clang-tidy", "-quiet", "-header-filter=.*", "/src/"+filename, "--", "-std=c++17", "-Wall", "-Wextra")
 	results = append(results, result)
 	if !result.Success {
 		return results, nil // Fail fast
@@ -452,7 +453,7 @@ func FormatResults(results []ValidationResult) string {
 	return sb.String()
 }
 
-// formatStageError parses and formats error output based on stage type
+// formatStageError parses and formats error output based on stage type (for user display)
 func formatStageError(stage, errorOutput string) string {
 	switch stage {
 	case "clang-tidy":
@@ -492,4 +493,38 @@ func formatStageError(stage, errorOutput string) string {
 		sb.WriteString(fmt.Sprintf("  %s\n", line))
 	}
 	return sb.String()
+}
+
+// FormatErrorForLLM formats a validation error in a compact format for LLM processing
+// Returns a clean, minimal representation without ANSI colors
+func FormatErrorForLLM(stage, errorOutput string) string {
+	var diags []Diagnostic
+
+	switch stage {
+	case "clang-tidy":
+		diags = ParseClangTidyOutput(errorOutput)
+	case "cppcheck":
+		diags = ParseCppcheckOutput(errorOutput)
+	case "asan":
+		diags = ParseSanitizerOutput(errorOutput, "asan")
+	case "ubsan":
+		diags = ParseSanitizerOutput(errorOutput, "ubsan")
+	case "tsan":
+		diags = ParseSanitizerOutput(errorOutput, "tsan")
+	case "compile":
+		// Compiler errors follow similar pattern to clang-tidy
+		diags = ParseClangTidyOutput(errorOutput)
+	}
+
+	if len(diags) > 0 {
+		return fmt.Sprintf("[%s] %s", stage, FormatDiagnosticsForLLM(diags))
+	}
+
+	// Fallback: use raw output but with stage prefix and truncated
+	lines := strings.Split(strings.TrimSpace(errorOutput), "\n")
+	if len(lines) > 10 {
+		lines = lines[:10]
+		lines = append(lines, "... (truncated)")
+	}
+	return fmt.Sprintf("[%s] %s", stage, strings.Join(lines, "\n"))
 }

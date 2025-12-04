@@ -37,6 +37,9 @@ _Last updated: 2025-12-04_
 | T-032 | Oracle mode for COMPLEX tasks (Opus model for architecture) | 2025-12-04 |
 | T-033 | Property-based testing (roundtrip, idempotent, etc.) | 2025-12-04 |
 | T-034 | Google Benchmark integration for performance validation | 2025-12-04 |
+| T-035 | Two-phase analysis: Classification (Haiku) → Analysis (complexity-based) | 2025-12-04 |
+| T-036 | Complexity-based model selection (EASY=Haiku, MEDIUM=Sonnet, COMPLEX=Opus) | 2025-12-04 |
+| T-037 | Validation error formatting for LLM (parsed, compact, -quiet flag) | 2025-12-04 |
 
 ---
 
@@ -44,7 +47,7 @@ _Last updated: 2025-12-04_
 
 | ID | Task | Started | Owner |
 |----|------|---------|-------|
-| — | (Empty - ready for new work) | — | — |
+| T-038 | UX improvements: Intent detection, graceful transitions, save prompts | 2025-12-04 | — |
 
 ---
 
@@ -88,6 +91,20 @@ All core workflow tasks completed (T-013, T-015, T-016 were implemented as part 
 | T-026 | Add iteration limits / token budget | T-014 | ✓ Done |
 | T-027 | Model selection via env vars or flags | T-006 | ✓ Done (env vars work) |
 | T-028 | Validate-only mode (existing code) | T-010 | ✓ Done |
+
+---
+
+## Backlog (Next Up)
+
+### UX Improvements (T-038)
+| Sub-task | Description | Status |
+|----------|-------------|--------|
+| T-038a | Intent classification with Haiku (CONTINUATION/NEW_TASK/QUESTION) | Pending |
+| T-038b | Graceful transitions: save prompt when switching tasks | Pending |
+| T-038c | Auto-save to .bjarne/history/ on successful validation | Pending |
+| T-038d | Context indicators in prompt ([file*] > for unsaved) | Pending |
+| T-038e | Natural language commands ("save as", "start fresh") | Pending |
+| T-038f | Skip analysis for continuations, run full analysis for new tasks | Pending |
 
 ---
 

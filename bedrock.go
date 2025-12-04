@@ -111,12 +111,22 @@ func (b *BedrockClient) GenerateWithModel(ctx context.Context, modelID, systemPr
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
+	// Check for empty content array
+	if len(response.Content) == 0 {
+		return nil, fmt.Errorf("model returned empty content (stop_reason: %s)", response.StopReason)
+	}
+
 	// Extract text content from response
 	var text string
 	for _, content := range response.Content {
 		if content.Type == "text" {
 			text += content.Text
 		}
+	}
+
+	// Check for empty text after extraction
+	if text == "" {
+		return nil, fmt.Errorf("model returned no text content (stop_reason: %s, content_types: %d)", response.StopReason, len(response.Content))
 	}
 
 	return &GenerateResult{

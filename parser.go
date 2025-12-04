@@ -200,6 +200,50 @@ func ParseSanitizerOutput(output string, sanitizerType string) []Diagnostic {
 	return diagnostics
 }
 
+// FormatDiagnosticsForLLM formats diagnostics in a compact format for LLM processing
+// No colors, minimal tokens, maximum clarity
+func FormatDiagnosticsForLLM(diagnostics []Diagnostic) string {
+	if len(diagnostics) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, d := range diagnostics {
+		// Compact format: file:line check-name: message
+		// Example: code.cpp:15 modernize-use-nullptr: use nullptr instead of NULL
+
+		// File and line
+		if d.File != "" {
+			// Strip /src/ prefix for cleaner output
+			file := d.File
+			if strings.HasPrefix(file, "/src/") {
+				file = file[5:]
+			}
+			sb.WriteString(file)
+			if d.Line > 0 {
+				sb.WriteString(":")
+				sb.WriteString(intToStr(d.Line))
+			}
+			sb.WriteString(" ")
+		}
+
+		// Check name (if available)
+		if d.Check != "" {
+			sb.WriteString(d.Check)
+			sb.WriteString(": ")
+		} else {
+			sb.WriteString(string(d.Level))
+			sb.WriteString(": ")
+		}
+
+		// Message
+		sb.WriteString(d.Message)
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
 // FormatDiagnostics formats diagnostics for user display
 func FormatDiagnostics(diagnostics []Diagnostic) string {
 	if len(diagnostics) == 0 {

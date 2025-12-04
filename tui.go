@@ -16,11 +16,10 @@ import (
 type State int
 
 const (
-	StateInput State = iota
-	StateThinking
-	StateOracle        // Deep analysis with Opus for COMPLEX tasks
-	StateAcknowledging
-	StateCollectingDoD // Waiting for Definition of Done from user
+	StateInput         State = iota
+	StateClassifying         // Quick classification with Haiku
+	StateThinking            // Full analysis with model based on complexity
+	StateAcknowledging       // Processing user's response to clarifying questions
 	StateGenerating
 	StateValidating
 	StateFixing // Attempting to fix failed code
@@ -98,9 +97,6 @@ type Model struct {
 	ctrlCPressed bool      // True if Ctrl+C was pressed once
 	ctrlCTime    time.Time // When Ctrl+C was pressed (for timeout)
 
-	// Code display toggle
-	codeExpanded bool // True to show full code, false for collapsed
-
 	// Session data
 	bedrock      *BedrockClient
 	container    *ContainerRuntime
@@ -114,6 +110,11 @@ type Model struct {
 }
 
 // Messages for async operations
+type classificationDoneMsg struct {
+	result *GenerateResult
+	err    error
+}
+
 type thinkingDoneMsg struct {
 	result *GenerateResult
 	err    error
@@ -125,16 +126,6 @@ type generatingDoneMsg struct {
 }
 
 type acknowledgeDoneMsg struct {
-	result *GenerateResult
-	err    error
-}
-
-type dodDoneMsg struct {
-	result *GenerateResult
-	err    error
-}
-
-type oracleDoneMsg struct {
 	result *GenerateResult
 	err    error
 }
@@ -227,14 +218,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-		case tea.KeyTab:
-			// Toggle code display if we have code
-			if m.state == StateInput && m.currentCode != "" {
-				m.codeExpanded = !m.codeExpanded
-				m.showCodeDisplay()
-				return m, nil
-			}
-
 		case tea.KeyEnter:
 			if m.state == StateInput {
 				input := strings.TrimSpace(m.textarea.Value())
@@ -252,57 +235,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// If already analyzed, user response goes to acknowledgment then generation
 				if m.analyzed {
+					// Show what the user typed
+					m.addOutput("")
+					m.addOutput(m.styles.Prompt.Render("> ") + input)
 					m.conversation = append(m.conversation, Message{Role: "user", Content: input})
 					return m.startAcknowledging()
 				}
 
-				// First input - start analysis
-				return m.startThinking(input)
-			}
-
-			// Handle DoD collection
-			if m.state == StateCollectingDoD {
-				input := strings.TrimSpace(m.textarea.Value())
-				if input == "" {
-					return m, nil
-				}
-
-				m.textarea.Reset()
-				m.textarea.Blur()
-
-				// Parse user's Definition of Done
-				m.dod = ParseDefinitionOfDone(input)
-				m.conversation = append(m.conversation, Message{Role: "user", Content: input})
-
-				// Show what we parsed
-				m.addOutput("")
-				if m.dod.HasTestableRequirements() {
-					m.addOutput(m.styles.Success.Render("Testable requirements captured:"))
-					m.addOutput("  " + m.dod.FormatDoDSummary())
-
-					// Merge DoD examples with any from prompt
-					dodExamples := m.dod.ToExampleTests()
-					if dodExamples != nil {
-						if m.examples == nil {
-							m.examples = dodExamples
-						} else {
-							m.examples.Tests = append(m.examples.Tests, dodExamples.Tests...)
-						}
-					}
-				} else {
-					m.addOutput(m.styles.Warning.Render("No specific testable requirements found - will use standard validation"))
-				}
-				m.addOutput("")
-
-				// Now proceed to generation
-				m.conversation = append(m.conversation, Message{Role: "user", Content: GenerateNowPrompt})
-				return m.startGenerating()
+				// First input - start with classification
+				return m.startClassifying(input)
 			}
 			return m, nil
 		}
 
-		// Handle input in input state or DoD collection
-		if m.state == StateInput || m.state == StateCollectingDoD {
+		// Handle input in input state
+		if m.state == StateInput {
 			var cmd tea.Cmd
 			m.textarea, cmd = m.textarea.Update(msg)
 			cmds = append(cmds, cmd)
@@ -312,6 +259,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd)
+
+	case classificationDoneMsg:
+		if msg.err != nil {
+			if m.ctx.Err() == context.Canceled {
+				return m, nil
+			}
+			// Classification failed - default to MEDIUM and continue
+			m.addOutput(m.styles.Warning.Render("Classification failed, defaulting to MEDIUM"))
+			m.difficulty = "MEDIUM"
+			return m.startThinking(m.getModelForComplexity("MEDIUM"))
+		}
+
+		// Parse the classification result (EASY/MEDIUM/COMPLEX)
+		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
+		classification := strings.TrimSpace(strings.ToUpper(msg.result.Text))
+
+		// Normalize the classification
+		switch {
+		case strings.Contains(classification, "EASY"):
+			m.difficulty = "EASY"
+		case strings.Contains(classification, "COMPLEX"):
+			m.difficulty = "COMPLEX"
+		default:
+			m.difficulty = "MEDIUM"
+		}
+
+		// Show classification result
+		m.addOutput("")
+		var diffDisplay string
+		switch m.difficulty {
+		case "EASY":
+			diffDisplay = m.styles.Success.Render("[EASY]")
+		case "MEDIUM":
+			diffDisplay = m.styles.Warning.Render("[MEDIUM]")
+		case "COMPLEX":
+			diffDisplay = m.styles.Error.Render("[COMPLEX]")
+		}
+		m.addOutput(fmt.Sprintf("Complexity: %s", diffDisplay))
+
+		// Select model based on complexity and start analysis
+		model := m.getModelForComplexity(m.difficulty)
+		return m.startThinking(model)
 
 	case thinkingDoneMsg:
 		if msg.err != nil {
@@ -324,62 +313,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textarea.Focus()
 			return m, nil
 		}
-		// Show reflection and ask for confirmation
+		// Show analysis from the appropriate model (already selected by classification)
 		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
 		m.conversation = append(m.conversation, Message{Role: "assistant", Content: msg.result.Text})
 
-		difficulty, reflection := parseDifficulty(msg.result.Text)
+		// Parse and clean the response (remove difficulty tag if present)
+		_, reflection := parseDifficulty(msg.result.Text)
 
-		// Show feasibility analysis box
+		// Show analysis box
 		m.addOutput("")
-		m.drawBox("PROMPT FEASIBILITY ANALYSIS", 56)
-		m.addOutput("")
-
-		var diffColor string
-		switch difficulty {
-		case "EASY":
-			diffColor = m.styles.Success.Render("[EASY] High success probability")
-		case "MEDIUM":
-			diffColor = m.styles.Warning.Render("[MEDIUM] May require iteration")
-		case "COMPLEX":
-			diffColor = m.styles.Error.Render("[COMPLEX] Multiple iterations likely")
-		}
-		m.addOutput(fmt.Sprintf("Feasibility: %s", diffColor))
+		m.drawBox("ANALYSIS", 56)
 		m.addOutput("")
 
 		// Display analysis with word wrapping
 		cleanText := stripMarkdown(reflection)
 		lines := wrapText(cleanText, 76)
-		for i, line := range lines {
-			if i == 0 {
-				m.addOutput(m.styles.Dim.Render("Analysis: ") + line)
-			} else {
-				m.addOutput("          " + line) // Indent continuation lines
-			}
+		for _, line := range lines {
+			m.addOutput(line)
 		}
 		m.addOutput("")
 
-		// Store difficulty for later flow decisions
-		m.difficulty = difficulty
-
-		if difficulty == "EASY" {
+		if m.difficulty == "EASY" {
 			// Skip confirmation for easy tasks - generate immediately
 			m.conversation = append(m.conversation, Message{Role: "user", Content: GenerateNowPrompt})
 			return m.startGenerating()
 		}
 
-		if difficulty == "COMPLEX" {
-			// For COMPLEX: launch Oracle (Opus) for deep architectural analysis
-			m.addOutput("")
-			m.addOutput(m.styles.Accent.Render("Engaging Oracle mode for deep architectural analysis..."))
-			return m.startOracle()
-		}
-
-		// For MEDIUM: user responds, then generate
+		// For MEDIUM/COMPLEX: wait for user input before generating
 		m.analyzed = true // Next input goes to acknowledgment
 		m.state = StateInput
 		m.textarea.Focus()
-		return m, nil
+		return m, textarea.Blink
 
 	case acknowledgeDoneMsg:
 		if msg.err != nil {
@@ -398,69 +362,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.addOutput("")
 		m.addOutput(m.styles.Info.Render("bjarne: ") + stripMarkdown(msg.result.Text))
 
-		// For COMPLEX tasks, ask for Definition of Done before generating
-		if m.difficulty == "COMPLEX" && m.dod == nil {
-			return m.startCollectingDoD()
-		}
-
-		// Proceed to generation
+		// Proceed to generation (user clarifications have been acknowledged)
 		m.conversation = append(m.conversation, Message{Role: "user", Content: GenerateNowPrompt})
 		return m.startGenerating()
-
-	case oracleDoneMsg:
-		if msg.err != nil {
-			if m.ctx.Err() == context.Canceled {
-				return m, nil
-			}
-			m.addOutput(m.styles.Error.Render("Oracle analysis failed: " + msg.err.Error()))
-			m.state = StateInput
-			m.textarea.Focus()
-			return m, nil
-		}
-		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
-		m.conversation = append(m.conversation, Message{Role: "assistant", Content: msg.result.Text})
-
-		// Show Oracle analysis
-		m.addOutput("")
-		m.drawBox("ARCHITECTURAL ANALYSIS (Oracle)", 56)
-		m.addOutput("")
-
-		// Display Oracle analysis with word wrapping
-		cleanText := stripMarkdown(msg.result.Text)
-		lines := wrapText(cleanText, 76)
-		for _, line := range lines {
-			m.addOutput(line)
-		}
-		m.addOutput("")
-
-		// After Oracle analysis, ask for Definition of Done
-		m.analyzed = true
-		return m.startCollectingDoD()
-
-	case dodDoneMsg:
-		if msg.err != nil {
-			if m.ctx.Err() == context.Canceled {
-				return m, nil
-			}
-			m.addOutput(m.styles.Error.Render("Error: " + msg.err.Error()))
-			m.state = StateInput
-			m.textarea.Focus()
-			return m, nil
-		}
-		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
-		m.conversation = append(m.conversation, Message{Role: "assistant", Content: msg.result.Text})
-
-		// Show DoD questions
-		m.addOutput("")
-		m.drawBox("DEFINITION OF DONE", 56)
-		m.addOutput("")
-		m.addOutput(m.styles.Info.Render("bjarne: ") + stripMarkdown(msg.result.Text))
-		m.addOutput("")
-
-		// Wait for user to provide DoD
-		m.state = StateCollectingDoD
-		m.textarea.Focus()
-		return m, nil
 
 	case generatingDoneMsg:
 		if msg.err != nil {
@@ -504,7 +408,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !r.Success {
 				allPassed = false
 				if r.Error != "" {
-					failedErrors = append(failedErrors, fmt.Sprintf("[%s] %s", r.Stage, r.Error))
+					// Use parsed, compact format for LLM instead of raw stderr
+					failedErrors = append(failedErrors, FormatErrorForLLM(r.Stage, r.Error))
 				}
 			}
 		}
@@ -584,11 +489,7 @@ func (m Model) View() string {
 		b.WriteString(m.styles.Prompt.Render(">") + " ")
 		b.WriteString(m.textarea.View())
 
-	case StateCollectingDoD:
-		b.WriteString(m.styles.Warning.Render("DoD>") + " ")
-		b.WriteString(m.textarea.View())
-
-	case StateThinking, StateOracle, StateAcknowledging, StateGenerating, StateValidating, StateFixing:
+	case StateClassifying, StateThinking, StateAcknowledging, StateGenerating, StateValidating, StateFixing:
 		elapsed := time.Since(m.startTime).Seconds()
 		status := fmt.Sprintf("esc to interrupt · %.0fs", elapsed)
 		if m.tokenCount > 0 {
@@ -631,9 +532,9 @@ func (m *Model) drawBox(title string, width int) {
 	m.addOutput(m.styles.Warning.Render(boxBottomLeft + strings.Repeat(boxHorizontal, innerWidth) + boxBottomRight))
 }
 
-func (m *Model) startThinking(prompt string) (Model, tea.Cmd) {
-	m.state = StateThinking
-	m.statusMsg = "Analyzing request…"
+func (m *Model) startClassifying(prompt string) (Model, tea.Cmd) {
+	m.state = StateClassifying
+	m.statusMsg = "Classifying complexity…"
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
@@ -652,9 +553,8 @@ func (m *Model) startThinking(prompt string) (Model, tea.Cmd) {
 	}
 
 	m.addOutput("")
-	m.addOutput(m.styles.Info.Render("Analyzing prompt feasibility..."))
 
-	// Add user message
+	// Add user message to conversation
 	m.conversation = append(m.conversation, Message{Role: "user", Content: prompt})
 
 	// Create cancelable context
@@ -664,21 +564,36 @@ func (m *Model) startThinking(prompt string) (Model, tea.Cmd) {
 
 	return *m, tea.Batch(
 		m.spinner.Tick,
-		m.doThinking(ctx),
+		m.doClassification(ctx),
 		tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
 	)
 }
 
-func (m *Model) doThinking(ctx context.Context) tea.Cmd {
+func (m *Model) doClassification(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.bedrock.GenerateWithModel(ctx, m.config.ChatModel, ReflectionSystemPrompt, m.conversation, m.config.MaxTokens)
-		return thinkingDoneMsg{result: result, err: err}
+		// Quick classification with Haiku
+		result, err := m.bedrock.GenerateWithModel(ctx, m.config.ReflectionModel, ClassificationPrompt, m.conversation, 50)
+		return classificationDoneMsg{result: result, err: err}
 	}
 }
 
-func (m *Model) startOracle() (Model, tea.Cmd) {
-	m.state = StateOracle
-	m.statusMsg = fmt.Sprintf("Oracle analysis with %s…", shortModelName(m.config.OracleModel))
+// getModelForComplexity returns the appropriate model based on task complexity
+func (m *Model) getModelForComplexity(difficulty string) string {
+	switch difficulty {
+	case "EASY":
+		return "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+	case "MEDIUM":
+		return "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+	case "COMPLEX":
+		return m.config.OracleModel // Opus
+	default:
+		return "global.anthropic.claude-sonnet-4-5-20250929-v1:0" // Default to Sonnet
+	}
+}
+
+func (m *Model) startThinking(model string) (Model, tea.Cmd) {
+	m.state = StateThinking
+	m.statusMsg = fmt.Sprintf("Analyzing with %s…", shortModelName(model))
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
@@ -688,15 +603,15 @@ func (m *Model) startOracle() (Model, tea.Cmd) {
 
 	return *m, tea.Batch(
 		m.spinner.Tick,
-		m.doOracle(ctx),
+		m.doThinking(ctx, model),
 		tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
 	)
 }
 
-func (m *Model) doOracle(ctx context.Context) tea.Cmd {
+func (m *Model) doThinking(ctx context.Context, model string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.bedrock.GenerateWithModel(ctx, m.config.OracleModel, OracleSystemPrompt, m.conversation, m.config.MaxTokens)
-		return oracleDoneMsg{result: result, err: err}
+		result, err := m.bedrock.GenerateWithModel(ctx, model, ReflectionSystemPrompt, m.conversation, m.config.MaxTokens)
+		return thinkingDoneMsg{result: result, err: err}
 	}
 }
 
@@ -724,33 +639,13 @@ func (m *Model) doAcknowledging(ctx context.Context) tea.Cmd {
 	}
 }
 
-func (m *Model) startCollectingDoD() (Model, tea.Cmd) {
-	m.state = StateAcknowledging // Reuse state for spinner display
-	m.statusMsg = "Preparing Definition of Done questions..."
-	m.startTime = time.Now()
-	m.tokenCount = 0
-
-	ctx, cancel := context.WithCancel(context.Background())
-	m.ctx = ctx
-	m.cancelFn = cancel
-
-	return *m, tea.Batch(
-		m.spinner.Tick,
-		m.doCollectingDoD(ctx),
-		tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
-	)
-}
-
-func (m *Model) doCollectingDoD(ctx context.Context) tea.Cmd {
-	return func() tea.Msg {
-		result, err := m.bedrock.GenerateWithModel(ctx, m.config.ChatModel, DoDPrompt, m.conversation, m.config.MaxTokens)
-		return dodDoneMsg{result: result, err: err}
-	}
-}
-
 func (m *Model) startGenerating() (Model, tea.Cmd) {
 	m.state = StateGenerating
-	m.statusMsg = fmt.Sprintf("Generating code with %s…", shortModelName(m.config.GenerateModel))
+
+	// Use model based on complexity (EASY=Haiku, MEDIUM=Sonnet, COMPLEX=Opus)
+	model := m.getModelForComplexity(m.difficulty)
+
+	m.statusMsg = fmt.Sprintf("Generating code with %s…", shortModelName(model))
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
@@ -759,7 +654,7 @@ func (m *Model) startGenerating() (Model, tea.Cmd) {
 
 	m.addOutput("")
 	m.addOutput(m.styles.Info.Render("Starting code generation..."))
-	m.addOutput(fmt.Sprintf("   Model: %s", m.styles.Accent.Render(shortModelName(m.config.GenerateModel))))
+	m.addOutput(fmt.Sprintf("   Model: %s", m.styles.Accent.Render(shortModelName(model))))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx = ctx
@@ -767,14 +662,14 @@ func (m *Model) startGenerating() (Model, tea.Cmd) {
 
 	return *m, tea.Batch(
 		m.spinner.Tick,
-		m.doGenerating(ctx),
+		m.doGenerating(ctx, model),
 		tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
 	)
 }
 
-func (m *Model) doGenerating(ctx context.Context) tea.Cmd {
+func (m *Model) doGenerating(ctx context.Context, model string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.bedrock.GenerateWithModel(ctx, m.config.GenerateModel, GenerationSystemPrompt, m.conversation, m.config.MaxTokens)
+		result, err := m.bedrock.GenerateWithModel(ctx, model, GenerationSystemPrompt, m.conversation, m.config.MaxTokens)
 		return generatingDoneMsg{result: result, err: err}
 	}
 }
@@ -821,20 +716,39 @@ func (m *Model) canEscalate() bool {
 	// Try 2 times with each model before escalating
 	maxPerModel := 2
 
+	// Build escalation chain based on complexity
+	var escalationChain []string
+	switch m.difficulty {
+	case "EASY":
+		escalationChain = []string{
+			"global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+			m.config.OracleModel,
+		}
+	case "MEDIUM":
+		escalationChain = []string{
+			m.config.OracleModel,
+		}
+	case "COMPLEX":
+		// Already at Opus, no escalation - just retry with Opus
+		escalationChain = []string{}
+	default:
+		escalationChain = m.config.EscalationModels
+	}
+
 	// If we're still on the generate model (index -1)
 	if m.currentModelIndex == -1 {
 		if m.currentIteration < maxPerModel {
 			return true
 		}
 		// Try to escalate to first escalation model
-		if len(m.config.EscalationModels) > 0 {
+		if len(escalationChain) > 0 {
 			return true
 		}
 		return false
 	}
 
 	// Check if we're past the last escalation model
-	if m.currentModelIndex >= len(m.config.EscalationModels) {
+	if m.currentModelIndex >= len(escalationChain) {
 		return false
 	}
 
@@ -844,18 +758,46 @@ func (m *Model) canEscalate() bool {
 	}
 
 	// Try to escalate to next model
-	return m.currentModelIndex+1 < len(m.config.EscalationModels)
+	return m.currentModelIndex+1 < len(escalationChain)
 }
 
 // getCurrentModel returns the current model to use for fixes
+// Uses the complexity-based model as the starting point, then escalates
 func (m *Model) getCurrentModel() string {
+	// Get the base model based on complexity (same as generation)
+	baseModel := m.getModelForComplexity(m.difficulty)
+
 	if m.currentModelIndex == -1 {
-		return m.config.GenerateModel
+		// First fix attempts use same model as generation
+		return baseModel
 	}
-	if m.currentModelIndex < len(m.config.EscalationModels) {
-		return m.config.EscalationModels[m.currentModelIndex]
+
+	// Build escalation chain starting from the base model
+	// For COMPLEX (Opus), no escalation possible - already at top
+	// For MEDIUM (Sonnet), escalate to Opus
+	// For EASY (Haiku), escalate to Sonnet then Opus
+	var escalationChain []string
+	switch m.difficulty {
+	case "EASY":
+		escalationChain = []string{
+			"global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+			m.config.OracleModel, // Opus
+		}
+	case "MEDIUM":
+		escalationChain = []string{
+			m.config.OracleModel, // Opus
+		}
+	case "COMPLEX":
+		// Already at Opus, no escalation
+		escalationChain = []string{}
+	default:
+		escalationChain = m.config.EscalationModels
 	}
-	return m.config.GenerateModel
+
+	if m.currentModelIndex < len(escalationChain) {
+		return escalationChain[m.currentModelIndex]
+	}
+	return baseModel
 }
 
 // advanceEscalation moves to the next iteration/model
@@ -895,6 +837,14 @@ func (m *Model) startFix() (Model, tea.Cmd) {
 
 	m.addOutput("")
 	m.addOutput(m.styles.Warning.Render(fmt.Sprintf("Attempting fix with %s (attempt %d)...", modelName, attemptNum)))
+
+	// Show the errors being sent to the LLM
+	m.addOutput(m.styles.Dim.Render("Errors to fix:"))
+	for _, line := range strings.Split(m.lastValidationErrs, "\n") {
+		if line != "" {
+			m.addOutput(m.styles.Dim.Render("  " + line))
+		}
+	}
 
 	// Add fix request to conversation
 	fixPrompt := fmt.Sprintf(IterationPromptTemplate, m.lastValidationErrs)
@@ -945,53 +895,19 @@ func (m *Model) showValidationSuccess(results []ValidationResult) {
 	m.addOutput(fmt.Sprintf("  %s All validation gates passed", m.styles.Success.Render(">>")))
 	m.addOutput("")
 
-	// Success box with collapsed code by default
+	// Success box with full code
 	m.addOutput(strings.Repeat("=", 80))
 	m.addOutput(m.styles.Success.Render("SUCCESS! Validated code:"))
 	m.addOutput(strings.Repeat("=", 80))
 
-	// Show collapsed or expanded based on state
-	m.codeExpanded = false // Start collapsed
-	m.showCodeDisplay()
+	// Show full code
+	m.addOutput("```cpp")
+	m.addOutput(m.currentCode)
+	m.addOutput("```")
 
 	m.addOutput("")
 	m.addOutput(fmt.Sprintf("Total validation time: %s", m.styles.Dim.Render(fmt.Sprintf("%.2fs", totalTime))))
-	m.addOutput(fmt.Sprintf("Use %s to save | %s to toggle code view", m.styles.Accent.Render("/save <filename>"), m.styles.Accent.Render("Tab")))
-}
-
-// showCodeDisplay shows the current code in collapsed or expanded form
-func (m *Model) showCodeDisplay() {
-	lines := strings.Split(m.currentCode, "\n")
-	lineCount := len(lines)
-
-	if m.codeExpanded {
-		// Show full code
-		m.addOutput("```cpp")
-		m.addOutput(m.currentCode)
-		m.addOutput("```")
-		m.addOutput(m.styles.Dim.Render(fmt.Sprintf("(%d lines) Press Tab to collapse", lineCount)))
-	} else {
-		// Show collapsed summary
-		maxPreview := 5
-		if lineCount <= maxPreview*2 {
-			// Short code - just show it all
-			m.addOutput("```cpp")
-			m.addOutput(m.currentCode)
-			m.addOutput("```")
-		} else {
-			// Show first few and last few lines
-			m.addOutput("```cpp")
-			for i := 0; i < maxPreview; i++ {
-				m.addOutput(lines[i])
-			}
-			m.addOutput(m.styles.Dim.Render(fmt.Sprintf("... (%d lines hidden) ...", lineCount-maxPreview*2)))
-			for i := lineCount - maxPreview; i < lineCount; i++ {
-				m.addOutput(lines[i])
-			}
-			m.addOutput("```")
-			m.addOutput(m.styles.Dim.Render(fmt.Sprintf("(%d lines) Press Tab to expand", lineCount)))
-		}
-	}
+	m.addOutput(fmt.Sprintf("Use %s to save", m.styles.Accent.Render("/save <filename>")))
 }
 
 func (m *Model) showValidationFailure(results []ValidationResult, isFinal bool) {
@@ -1019,9 +935,10 @@ func (m *Model) showValidationFailure(results []ValidationResult, isFinal bool) 
 	m.addOutput("")
 	m.addOutput(m.styles.Warning.Render("Generated code (failed validation):"))
 
-	// Show collapsed code
-	m.codeExpanded = false
-	m.showCodeDisplay()
+	// Show full code
+	m.addOutput("```cpp")
+	m.addOutput(m.currentCode)
+	m.addOutput("```")
 	m.addOutput("")
 	m.addOutput("You can refine your request or ask bjarne to fix specific issues.")
 }
@@ -1064,8 +981,9 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		} else {
 			m.addOutput("")
 			m.addOutput(m.styles.Warning.Render("Last generated code:"))
-			m.codeExpanded = true // /code always shows full code
-			m.showCodeDisplay()
+			m.addOutput("```cpp")
+			m.addOutput(m.currentCode)
+			m.addOutput("```")
 		}
 
 	case "/save", "/s":
@@ -1137,10 +1055,11 @@ func StartTUI() error {
 		fmt.Print(FormatUserError(err))
 		return err
 	}
-	fmt.Printf("Chat model: %s\n", shortModelName(cfg.ChatModel))
-	fmt.Printf("Generate model: %s\n", shortModelName(cfg.GenerateModel))
+	fmt.Printf("Reflection: %s\n", shortModelName(cfg.ReflectionModel))
+	fmt.Printf("Generation: %s\n", shortModelName(cfg.GenerateModel))
+	fmt.Printf("Oracle: %s\n", shortModelName(cfg.OracleModel))
 	if cfg.EscalateOnFailure && len(cfg.EscalationModels) > 0 {
-		fmt.Printf("Escalation: enabled (%d models)\n", len(cfg.EscalationModels))
+		fmt.Printf("Escalation: enabled → %s\n", shortModelName(cfg.EscalationModels[0]))
 	}
 	fmt.Println()
 	fmt.Println("Type /help for commands, /quit to exit")

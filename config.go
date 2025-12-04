@@ -22,6 +22,7 @@ type Config struct {
 
 	// Model configuration
 	ChatModel         string   // Model for chat/non-code responses
+	ReflectionModel   string   // Model for initial prompt analysis
 	GenerateModel     string   // Model for initial code generation
 	OracleModel       string   // Model for deep analysis (COMPLEX tasks)
 	EscalationModels  []string // Models to try on validation failure
@@ -45,6 +46,7 @@ func configFromSettings(settings *Settings) *Config {
 		WarnTokenThreshold: settings.Tokens.MaxPerSession * 80 / 100,
 		ValidatorImage:     settings.Container.Image,
 		ChatModel:          settings.Models.Chat,
+		ReflectionModel:    settings.Models.Reflection,
 		GenerateModel:      settings.Models.Generate,
 		OracleModel:        settings.Models.Oracle,
 		EscalationModels:   settings.Models.Escalation,
