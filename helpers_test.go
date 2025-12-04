@@ -45,6 +45,16 @@ func TestExtractCode(t *testing.T) {
 			response: "```cpp\nfirst\n```\ntext\n```cpp\nsecond\n```",
 			expected: "first",
 		},
+		{
+			name:     "truncated response (no closing fence)",
+			response: "Here's the code:\n```cpp\nint main() {\n    return 0;\n}",
+			expected: "int main() {\n    return 0;\n}",
+		},
+		{
+			name:     "windows line endings",
+			response: "```cpp\r\nint x = 1;\r\n```",
+			expected: "int x = 1;",
+		},
 	}
 
 	for _, tt := range tests {

@@ -83,12 +83,27 @@ func parseDifficulty(text string) (string, string) {
 
 // extractCode extracts code from a markdown code block
 func extractCode(response string) string {
-	// Match ```cpp ... ``` or ```c ... ``` or ``` ... ```
-	re := regexp.MustCompile("(?s)```(?:cpp|c|c\\+\\+)?\\s*\\n(.*?)\\n```")
+	// Normalize line endings (Windows \r\n to \n)
+	response = strings.ReplaceAll(response, "\r\n", "\n")
+
+	// Match ```cpp ... ``` or ```c ... ``` or ```c++ ... ``` or ``` ... ```
+	// Language specifier must be followed by whitespace or newline
+	// More permissive: handle optional trailing newline before closing ```
+	re := regexp.MustCompile("(?s)```(?:cpp|c\\+\\+|c)?[ \t]*\n(.*?)\n?```")
 	matches := re.FindStringSubmatch(response)
 	if len(matches) >= 2 {
 		return strings.TrimSpace(matches[1])
 	}
+
+	// Fallback: if response was truncated (no closing ```), try to extract anyway
+	// Only if we find an opening fence with code language
+	reOpen := regexp.MustCompile("(?s)```(?:cpp|c\\+\\+|c)[ \t]*\n(.+)")
+	matches = reOpen.FindStringSubmatch(response)
+	if len(matches) >= 2 {
+		// Return everything after the opening fence
+		return strings.TrimSpace(matches[1])
+	}
+
 	return ""
 }
 
