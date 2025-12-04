@@ -93,6 +93,13 @@ type Model struct {
 	lastValidationErrs string   // Last validation errors for fix prompt
 	modelsUsed         []string // Track which models we've tried
 
+	// Exit confirmation
+	ctrlCPressed bool      // True if Ctrl+C was pressed once
+	ctrlCTime    time.Time // When Ctrl+C was pressed (for timeout)
+
+	// Code display toggle
+	codeExpanded bool // True to show full code, false for collapsed
+
 	// Session data
 	bedrock      *BedrockClient
 	container    *ContainerRuntime
@@ -185,10 +192,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Reset Ctrl+C state on any other key press
+		if msg.Type != tea.KeyCtrlC {
+			m.ctrlCPressed = false
+		}
+
 		switch msg.Type {
 		case tea.KeyCtrlC:
-			// Always quit on Ctrl+C
-			return m, tea.Quit
+			// Double Ctrl+C to quit
+			if m.ctrlCPressed && time.Since(m.ctrlCTime) < 2*time.Second {
+				return m, tea.Quit
+			}
+			m.ctrlCPressed = true
+			m.ctrlCTime = time.Now()
+			m.addOutput("")
+			m.addOutput(m.styles.Warning.Render("Press Ctrl+C again to exit"))
+			return m, nil
 
 		case tea.KeyEsc:
 			// Cancel current operation if processing
@@ -199,6 +218,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = StateInput
 				m.addOutput(m.styles.Warning.Render("-- Interrupted --"))
 				m.textarea.Focus()
+				return m, nil
+			}
+
+		case tea.KeyTab:
+			// Toggle code display if we have code
+			if m.state == StateInput && m.currentCode != "" {
+				m.codeExpanded = !m.codeExpanded
+				m.showCodeDisplay()
 				return m, nil
 			}
 
@@ -447,14 +474,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showValidationSuccess(msg.results)
 			m.state = StateInput
 			m.textarea.Focus()
-			return m, nil
+			return m, textarea.Blink
 		}
 
 		// Validation failed - check if escalation is enabled and we can retry
 		m.lastValidationErrs = strings.Join(failedErrors, "\n")
-		m.showValidationFailure(msg.results)
 
-		if m.config.EscalateOnFailure && m.canEscalate() {
+		canRetry := m.config.EscalateOnFailure && m.canEscalate()
+		m.showValidationFailure(msg.results, !canRetry) // isFinal = !canRetry
+
+		if canRetry {
 			return m.startFix()
 		}
 
@@ -463,7 +492,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetEscalation()
 		m.state = StateInput
 		m.textarea.Focus()
-		return m, nil
+		return m, textarea.Blink
 
 	case fixDoneMsg:
 		if msg.err != nil {
@@ -850,56 +879,83 @@ func (m *Model) showValidationSuccess(results []ValidationResult) {
 	m.addOutput(fmt.Sprintf("  %s All validation gates passed", m.styles.Success.Render(">>")))
 	m.addOutput("")
 
-	// Success box with code
+	// Success box with collapsed code by default
 	m.addOutput(strings.Repeat("=", 80))
 	m.addOutput(m.styles.Success.Render("SUCCESS! Validated code:"))
 	m.addOutput(strings.Repeat("=", 80))
-	m.addOutput("```cpp")
-	m.addOutput(m.currentCode)
-	m.addOutput("```")
-	m.addOutput(strings.Repeat("=", 80))
+
+	// Show collapsed or expanded based on state
+	m.codeExpanded = false // Start collapsed
+	m.showCodeDisplay()
+
 	m.addOutput("")
 	m.addOutput(fmt.Sprintf("Total validation time: %s", m.styles.Dim.Render(fmt.Sprintf("%.2fs", totalTime))))
-	m.addOutput(fmt.Sprintf("Use %s to save the validated code", m.styles.Accent.Render("/save <filename>")))
+	m.addOutput(fmt.Sprintf("Use %s to save | %s to toggle code view", m.styles.Accent.Render("/save <filename>"), m.styles.Accent.Render("Tab")))
 }
 
-func (m *Model) showValidationFailure(results []ValidationResult) {
-	// Show gate results in tree style
-	for i, r := range results {
-		prefix := treeBranch
-		if i == len(results)-1 {
-			prefix = treeEnd
-		}
-		m.addOutput(fmt.Sprintf("  %s Gate %d: %s...", prefix, i+1, r.Stage))
-		if r.Success {
-			m.addOutput(fmt.Sprintf("  %s  %s %s", treeVert, m.styles.Success.Render("PASS"), m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
+// showCodeDisplay shows the current code in collapsed or expanded form
+func (m *Model) showCodeDisplay() {
+	lines := strings.Split(m.currentCode, "\n")
+	lineCount := len(lines)
+
+	if m.codeExpanded {
+		// Show full code
+		m.addOutput("```cpp")
+		m.addOutput(m.currentCode)
+		m.addOutput("```")
+		m.addOutput(m.styles.Dim.Render(fmt.Sprintf("(%d lines) Press Tab to collapse", lineCount)))
+	} else {
+		// Show collapsed summary
+		maxPreview := 5
+		if lineCount <= maxPreview*2 {
+			// Short code - just show it all
+			m.addOutput("```cpp")
+			m.addOutput(m.currentCode)
+			m.addOutput("```")
 		} else {
-			m.addOutput(fmt.Sprintf("  %s  %s %s", treeVert, m.styles.Error.Render("FAIL"), m.styles.Dim.Render(fmt.Sprintf("(%.2fs)", r.Duration.Seconds()))))
-			// Show error details
-			if r.Error != "" {
-				errLines := strings.Split(r.Error, "\n")
-				for j, line := range errLines {
-					if j >= 3 {
-						m.addOutput(fmt.Sprintf("  %s  %s", treeVert, m.styles.Dim.Render("... (truncated)")))
-						break
-					}
-					if line != "" {
-						m.addOutput(fmt.Sprintf("  %s  %s", treeVert, m.styles.Dim.Render(truncateError(line, 70))))
-					}
-				}
+			// Show first few and last few lines
+			m.addOutput("```cpp")
+			for i := 0; i < maxPreview; i++ {
+				m.addOutput(lines[i])
 			}
+			m.addOutput(m.styles.Dim.Render(fmt.Sprintf("... (%d lines hidden) ...", lineCount-maxPreview*2)))
+			for i := lineCount - maxPreview; i < lineCount; i++ {
+				m.addOutput(lines[i])
+			}
+			m.addOutput("```")
+			m.addOutput(m.styles.Dim.Render(fmt.Sprintf("(%d lines) Press Tab to expand", lineCount)))
+		}
+	}
+}
+
+func (m *Model) showValidationFailure(results []ValidationResult, isFinal bool) {
+	// Show gate results in compact form
+	for _, r := range results {
+		if r.Success {
+			m.addOutput(fmt.Sprintf("  %s %s", m.styles.Success.Render("✓"), r.Stage))
+		} else {
+			m.addOutput(fmt.Sprintf("  %s %s", m.styles.Error.Render("✗"), r.Stage))
 		}
 	}
 
+	if !isFinal {
+		// Not final - will retry, don't show code
+		m.addOutput("")
+		m.addOutput(m.styles.Warning.Render("Validation failed, refactoring..."))
+		return
+	}
+
+	// Final failure - show code
 	m.addOutput("")
 	m.addOutput(strings.Repeat("=", 80))
 	m.addOutput(m.styles.Error.Render("FAILED! Validation did not pass."))
 	m.addOutput(strings.Repeat("=", 80))
 	m.addOutput("")
 	m.addOutput(m.styles.Warning.Render("Generated code (failed validation):"))
-	m.addOutput("```cpp")
-	m.addOutput(m.currentCode)
-	m.addOutput("```")
+
+	// Show collapsed code
+	m.codeExpanded = false
+	m.showCodeDisplay()
 	m.addOutput("")
 	m.addOutput("You can refine your request or ask bjarne to fix specific issues.")
 }
@@ -942,9 +998,8 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		} else {
 			m.addOutput("")
 			m.addOutput(m.styles.Warning.Render("Last generated code:"))
-			m.addOutput("```cpp")
-			m.addOutput(m.currentCode)
-			m.addOutput("```")
+			m.codeExpanded = true // /code always shows full code
+			m.showCodeDisplay()
 		}
 
 	case "/save", "/s":
