@@ -22,6 +22,7 @@ const (
 	StateCollectingDoD // Waiting for Definition of Done from user
 	StateGenerating
 	StateValidating
+	StateFixing // Attempting to fix failed code
 )
 
 // Box drawing characters for visual sections
@@ -86,6 +87,12 @@ type Model struct {
 	dod            *DefinitionOfDone // Definition of Done for complex tasks
 	difficulty     string            // EASY, MEDIUM, COMPLEX from reflection
 
+	// Escalation tracking
+	currentIteration   int      // Current fix attempt (1-based)
+	currentModelIndex  int      // Index into escalation chain (-1 = generate model)
+	lastValidationErrs string   // Last validation errors for fix prompt
+	modelsUsed         []string // Track which models we've tried
+
 	// Session data
 	bedrock      *BedrockClient
 	container    *ContainerRuntime
@@ -122,6 +129,11 @@ type dodDoneMsg struct {
 type validationDoneMsg struct {
 	results []ValidationResult
 	err     error
+}
+
+type fixDoneMsg struct {
+	result *GenerateResult
+	err    error
 }
 
 type tickMsg time.Time
@@ -418,25 +430,69 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		allPassed := true
+		var failedErrors []string
 		for _, r := range msg.results {
 			if !r.Success {
 				allPassed = false
-				break
+				if r.Error != "" {
+					failedErrors = append(failedErrors, fmt.Sprintf("[%s] %s", r.Stage, r.Error))
+				}
 			}
 		}
 
 		if allPassed {
 			m.validated = true
 			m.analyzed = false // Reset for next prompt
+			m.resetEscalation()
 			m.showValidationSuccess(msg.results)
-		} else {
-			m.validated = false
-			m.showValidationFailure(msg.results)
+			m.state = StateInput
+			m.textarea.Focus()
+			return m, nil
 		}
 
+		// Validation failed - check if escalation is enabled and we can retry
+		m.lastValidationErrs = strings.Join(failedErrors, "\n")
+		m.showValidationFailure(msg.results)
+
+		if m.config.EscalateOnFailure && m.canEscalate() {
+			return m.startFix()
+		}
+
+		// No more escalation possible
+		m.showEscalationExhausted()
+		m.resetEscalation()
 		m.state = StateInput
 		m.textarea.Focus()
 		return m, nil
+
+	case fixDoneMsg:
+		if msg.err != nil {
+			if m.ctx.Err() == context.Canceled {
+				return m, nil
+			}
+			m.addOutput(m.styles.Error.Render("Fix generation failed: " + msg.err.Error()))
+			m.state = StateInput
+			m.textarea.Focus()
+			return m, nil
+		}
+		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
+		m.conversation = append(m.conversation, Message{Role: "assistant", Content: msg.result.Text})
+
+		code := extractCode(msg.result.Text)
+		if code == "" {
+			m.addOutput(m.styles.Warning.Render("No code in fix response, retrying..."))
+			if m.canEscalate() {
+				return m.startFix()
+			}
+			m.showEscalationExhausted()
+			m.resetEscalation()
+			m.state = StateInput
+			m.textarea.Focus()
+			return m, nil
+		}
+
+		m.currentCode = code
+		return m.startValidation()
 
 	case tickMsg:
 		// Update elapsed time display
@@ -461,7 +517,7 @@ func (m Model) View() string {
 		b.WriteString(m.styles.Warning.Render("DoD>") + " ")
 		b.WriteString(m.textarea.View())
 
-	case StateThinking, StateAcknowledging, StateGenerating, StateValidating:
+	case StateThinking, StateAcknowledging, StateGenerating, StateValidating, StateFixing:
 		elapsed := time.Since(m.startTime).Seconds()
 		status := fmt.Sprintf("esc to interrupt · %.0fs", elapsed)
 		if m.tokenCount > 0 {
@@ -652,6 +708,122 @@ func (m *Model) doValidation(ctx context.Context) tea.Cmd {
 	}
 }
 
+// Escalation helper methods
+
+// resetEscalation resets escalation state for a new generation cycle
+func (m *Model) resetEscalation() {
+	m.currentIteration = 0
+	m.currentModelIndex = -1
+	m.lastValidationErrs = ""
+	m.modelsUsed = nil
+}
+
+// canEscalate checks if we can attempt another fix
+func (m *Model) canEscalate() bool {
+	// Try 2 times with each model before escalating
+	maxPerModel := 2
+
+	// If we're still on the generate model (index -1)
+	if m.currentModelIndex == -1 {
+		if m.currentIteration < maxPerModel {
+			return true
+		}
+		// Try to escalate to first escalation model
+		if len(m.config.EscalationModels) > 0 {
+			return true
+		}
+		return false
+	}
+
+	// Check if we're past the last escalation model
+	if m.currentModelIndex >= len(m.config.EscalationModels) {
+		return false
+	}
+
+	// We're on a valid escalation model
+	if m.currentIteration < maxPerModel {
+		return true
+	}
+
+	// Try to escalate to next model
+	return m.currentModelIndex+1 < len(m.config.EscalationModels)
+}
+
+// getCurrentModel returns the current model to use for fixes
+func (m *Model) getCurrentModel() string {
+	if m.currentModelIndex == -1 {
+		return m.config.GenerateModel
+	}
+	if m.currentModelIndex < len(m.config.EscalationModels) {
+		return m.config.EscalationModels[m.currentModelIndex]
+	}
+	return m.config.GenerateModel
+}
+
+// advanceEscalation moves to the next iteration/model
+func (m *Model) advanceEscalation() {
+	maxPerModel := 2
+
+	m.currentIteration++
+
+	// Check if we need to escalate to a more powerful model
+	if m.currentIteration >= maxPerModel {
+		m.currentIteration = 0
+		m.currentModelIndex++
+	}
+}
+
+func (m *Model) startFix() (Model, tea.Cmd) {
+	m.advanceEscalation()
+
+	currentModel := m.getCurrentModel()
+	modelName := shortModelName(currentModel)
+
+	// Track which models we've used
+	if m.currentIteration == 0 || len(m.modelsUsed) == 0 || m.modelsUsed[len(m.modelsUsed)-1] != modelName {
+		m.modelsUsed = append(m.modelsUsed, modelName)
+	}
+
+	m.state = StateFixing
+	m.statusMsg = fmt.Sprintf("Fixing with %s (attempt %d)…", modelName, m.currentIteration+1)
+	m.startTime = time.Now()
+	m.tokenCount = 0
+
+	m.addOutput("")
+	m.addOutput(m.styles.Warning.Render(fmt.Sprintf("Attempting fix with %s (attempt %d)...", modelName, m.currentIteration+1)))
+
+	// Add fix request to conversation
+	fixPrompt := fmt.Sprintf(IterationPromptTemplate, m.lastValidationErrs)
+	m.conversation = append(m.conversation, Message{Role: "user", Content: fixPrompt})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.ctx = ctx
+	m.cancelFn = cancel
+
+	return *m, tea.Batch(
+		m.spinner.Tick,
+		m.doFix(ctx, currentModel),
+		tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
+	)
+}
+
+func (m *Model) doFix(ctx context.Context, model string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := m.bedrock.GenerateWithModel(ctx, model, GenerationSystemPrompt, m.conversation, m.config.MaxTokens)
+		return fixDoneMsg{result: result, err: err}
+	}
+}
+
+func (m *Model) showEscalationExhausted() {
+	m.addOutput("")
+	m.addOutput(m.styles.Error.Render("All fix attempts exhausted."))
+	if len(m.modelsUsed) > 0 {
+		m.addOutput(m.styles.Dim.Render(fmt.Sprintf("Models tried: %s", strings.Join(m.modelsUsed, " → "))))
+	}
+	m.addOutput("")
+	m.addOutput("You can refine your request or ask bjarne to fix specific issues.")
+}
+
 func (m *Model) showValidationSuccess(results []ValidationResult) {
 	// Show gate results in tree style
 	totalTime := 0.0
@@ -751,6 +923,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.examples = nil
 		m.dod = nil
 		m.difficulty = ""
+		m.resetEscalation()
 		m.tokenTracker.Reset()
 		m.addOutput("Conversation cleared.")
 
