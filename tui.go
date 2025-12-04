@@ -659,6 +659,9 @@ func (m *Model) startGenerating() (Model, tea.Cmd) {
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
+	// Reset escalation state for fresh generation cycle
+	m.resetEscalation()
+
 	m.addOutput("")
 	m.addOutput(m.styles.Info.Render("Starting code generation..."))
 	m.addOutput(fmt.Sprintf("   Model: %s", m.styles.Accent.Render(shortModelName(m.config.GenerateModel))))
