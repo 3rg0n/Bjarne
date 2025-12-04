@@ -86,28 +86,37 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 }
 
 // ValidateCodeWithExamples runs validation including example-based tests
-func (c *ContainerRuntime) ValidateCodeWithExamples(ctx context.Context, code string, filename string, examples *ExampleTests, progress ProgressCallback) ([]ValidationResult, error) {
-	// If we have example tests, generate a test harness and add example validation
+func (c *ContainerRuntime) ValidateCodeWithExamples(ctx context.Context, code string, filename string, examples *ExampleTests, dod *DefinitionOfDone) ([]ValidationResult, error) {
+	return c.validateCodeFull(ctx, code, filename, examples, dod, nil)
+}
+
+// ValidateCodeWithDoD runs validation with Definition of Done requirements
+func (c *ContainerRuntime) ValidateCodeWithDoD(ctx context.Context, code string, filename string, examples *ExampleTests, dod *DefinitionOfDone, progress ProgressCallback) ([]ValidationResult, error) {
+	return c.validateCodeFull(ctx, code, filename, examples, dod, progress)
+}
+
+// validateCodeFull runs the full validation pipeline with examples and DoD
+func (c *ContainerRuntime) validateCodeFull(ctx context.Context, code string, filename string, examples *ExampleTests, dod *DefinitionOfDone, progress ProgressCallback) ([]ValidationResult, error) {
+	// First, validate the original code through normal pipeline
+	results, err := c.ValidateCodeWithProgress(ctx, code, filename, progress)
+	if err != nil {
+		return results, err
+	}
+
+	// Check if normal validation passed
+	allPassed := true
+	for _, r := range results {
+		if !r.Success {
+			allPassed = false
+			break
+		}
+	}
+	if !allPassed {
+		return results, nil // Fail fast on normal validation
+	}
+
+	// Run example tests if provided
 	if examples != nil && len(examples.Tests) > 0 {
-		// First, validate the original code through normal pipeline
-		results, err := c.ValidateCodeWithProgress(ctx, code, filename, progress)
-		if err != nil {
-			return results, err
-		}
-
-		// Check if normal validation passed
-		allPassed := true
-		for _, r := range results {
-			if !r.Success {
-				allPassed = false
-				break
-			}
-		}
-		if !allPassed {
-			return results, nil // Fail fast on normal validation
-		}
-
-		// Generate test harness and run example tests
 		harness := GenerateTestHarness(code, examples)
 		harnessFilename := "test_harness.cpp"
 
@@ -136,11 +145,47 @@ func (c *ContainerRuntime) ValidateCodeWithExamples(ctx context.Context, code st
 		}
 		results = append(results, result)
 
-		return results, nil
+		if !result.Success {
+			return results, nil // Fail fast on example tests
+		}
 	}
 
-	// No examples - run normal validation
-	return c.ValidateCodeWithProgress(ctx, code, filename, progress)
+	// Run benchmark if DoD has performance requirements
+	if dod != nil && dod.MaxTimeMs > 0 {
+		// Try to detect function name for benchmarking
+		funcCall := detectBenchmarkFunction(code, examples)
+		if funcCall != "" {
+			benchHarness := dod.GenerateBenchmarkHarness(code, funcCall)
+			benchFilename := "benchmark.cpp"
+
+			// Create temp directory for benchmark
+			tmpDir, err := os.MkdirTemp("", "bjarne-bench-*")
+			if err != nil {
+				return results, fmt.Errorf("failed to create temp dir for benchmark: %w", err)
+			}
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			// Write benchmark harness
+			benchPath := filepath.Join(tmpDir, benchFilename)
+			if err := os.WriteFile(benchPath, []byte(benchHarness), 0600); err != nil {
+				return results, fmt.Errorf("failed to write benchmark: %w", err)
+			}
+
+			// Run benchmark
+			if progress != nil {
+				progress("benchmark", true, nil)
+			}
+			result := c.runValidationStage(ctx, tmpDir, "benchmark",
+				"sh", "-c",
+				"clang++ -std=c++17 -O2 -o /tmp/benchmark /src/"+benchFilename+" && /tmp/benchmark")
+			if progress != nil {
+				progress("benchmark", false, &result)
+			}
+			results = append(results, result)
+		}
+	}
+
+	return results, nil
 }
 
 // ValidateCodeWithProgress runs the full validation pipeline with progress callbacks
@@ -309,6 +354,54 @@ func (c *ContainerRuntime) runValidationStage(ctx context.Context, tmpDir, stage
 	}
 
 	return result
+}
+
+// detectBenchmarkFunction tries to find a function to benchmark in the code
+// Returns empty string if no suitable function found
+func detectBenchmarkFunction(code string, examples *ExampleTests) string {
+	// If we have examples, use the function name from those
+	if examples != nil && examples.FunctionName != "" {
+		// Try to construct a valid call
+		// For functions that take simple arguments, create a test call
+		funcName := examples.FunctionName
+		if len(examples.Tests) > 0 {
+			// Use the first test case's function call
+			return examples.Tests[0].FunctionCall
+		}
+		return funcName + "()"
+	}
+
+	// Try to detect common function patterns
+	// Look for functions that aren't main()
+	// Pattern: returnType functionName(args)
+	lines := strings.Split(code, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Skip main function
+		if strings.Contains(line, "int main") {
+			continue
+		}
+		// Look for function definitions that could be benchmarked
+		// Simple heuristic: type name followed by ( and not a control structure
+		if strings.Contains(line, "(") && !strings.HasPrefix(line, "//") {
+			// Check if it looks like a function definition (not a call)
+			for _, retType := range []string{"int ", "void ", "bool ", "double ", "float ", "long ", "auto "} {
+				if strings.HasPrefix(line, retType) {
+					// Extract function name
+					rest := strings.TrimPrefix(line, retType)
+					if idx := strings.Index(rest, "("); idx > 0 {
+						funcName := strings.TrimSpace(rest[:idx])
+						// Skip if it contains operators or looks invalid
+						if !strings.ContainsAny(funcName, " *&<>[]") && len(funcName) > 0 {
+							return funcName + "()"
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return ""
 }
 
 // codeUsesThreads checks if the code appears to use threading

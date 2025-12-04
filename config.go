@@ -23,6 +23,7 @@ type Config struct {
 	// Model configuration
 	ChatModel         string   // Model for chat/non-code responses
 	GenerateModel     string   // Model for initial code generation
+	OracleModel       string   // Model for deep analysis (COMPLEX tasks)
 	EscalationModels  []string // Models to try on validation failure
 	EscalateOnFailure bool
 }
@@ -45,6 +46,7 @@ func configFromSettings(settings *Settings) *Config {
 		ValidatorImage:     settings.Container.Image,
 		ChatModel:          settings.Models.Chat,
 		GenerateModel:      settings.Models.Generate,
+		OracleModel:        settings.Models.Oracle,
 		EscalationModels:   settings.Models.Escalation,
 		EscalateOnFailure:  settings.Validation.EscalateOnFailure,
 	}

@@ -12,6 +12,9 @@ type DefinitionOfDone struct {
 	// Correctness tests - input -> expected output
 	Examples []TestCase
 
+	// Property-based tests - invariants that must hold
+	Properties []PropertyTest
+
 	// Behavioral requirements
 	HandleEmpty    bool // Should handle empty input
 	HandleNegative bool // Should handle negative numbers
@@ -27,6 +30,13 @@ type DefinitionOfDone struct {
 	CannotTest []string
 }
 
+// PropertyTest represents a property that should hold
+type PropertyTest struct {
+	Name        string // e.g., "idempotent", "roundtrip", "invariant"
+	Description string // Human-readable description
+	Code        string // C++ assertion code to include
+}
+
 // DoDPrompt is the system prompt for collecting Definition of Done
 const DoDPrompt = `You are bjarne. The user has described a complex task. Before generating code, you need a Definition of Done that you can actually test.
 
@@ -35,10 +45,17 @@ Your job is to ask the user for TESTABLE acceptance criteria. Be direct and spec
 WHAT YOU CAN TEST (in the validation container):
 - Specific input/output examples: "process(5) returns 120"
 - Edge case handling: empty input, negative numbers, overflow
+- Property invariants: "reverse(reverse(x)) == x", "sort is idempotent"
 - Thread safety: via ThreadSanitizer
 - Memory safety: via AddressSanitizer
 - Performance benchmarks: "sort(10000) completes in <100ms"
 - Complexity: functions under 100 lines, cyclomatic complexity <15
+
+PROPERTY TYPES TO ASK ABOUT:
+- Roundtrip: encode then decode gives original
+- Idempotent: doing twice same as once
+- Invariants: size >= 0, sorted output is sorted
+- Commutativity: order doesn't matter
 
 WHAT YOU CANNOT TEST:
 - Production deployment
@@ -51,6 +68,7 @@ FORMAT YOUR RESPONSE AS:
 2. List what you CAN test with specific questions:
    - "What should X return for input Y?"
    - "Should it handle empty input? Negative numbers?"
+   - "Any properties I should verify? (e.g., reversing twice gives original)"
    - "Any performance target I can benchmark? (e.g., N items in <X ms)"
 3. List what you CANNOT test (be honest)
 4. End with: "Once you answer, I'll generate tests first, then the code."
@@ -92,6 +110,9 @@ func ParseDefinitionOfDone(response string) *DefinitionOfDone {
 	} else if strings.Contains(responseLower, "thread") && containsYes(responseLower, "thread") {
 		dod.ThreadSafe = true
 	}
+
+	// Parse property tests
+	parseProperties(responseLower, dod)
 
 	// Parse performance requirements
 	// Pattern: "N items in <X ms" or "< X ms" or "under X ms"
@@ -153,9 +174,52 @@ func containsYes(response, feature string) bool {
 	return hasAffirmative && !hasNegative
 }
 
+// parseProperties detects common property patterns in user response
+func parseProperties(response string, dod *DefinitionOfDone) {
+	// Check for roundtrip/inverse properties
+	if strings.Contains(response, "roundtrip") ||
+		strings.Contains(response, "round-trip") ||
+		strings.Contains(response, "encode") && strings.Contains(response, "decode") ||
+		strings.Contains(response, "reverse") && strings.Contains(response, "twice") {
+		dod.Properties = append(dod.Properties, PropertyTest{
+			Name:        "roundtrip",
+			Description: "Roundtrip property: operation and its inverse yield original",
+		})
+	}
+
+	// Check for idempotent properties
+	if strings.Contains(response, "idempotent") ||
+		strings.Contains(response, "twice") && strings.Contains(response, "same") ||
+		strings.Contains(response, "sort") && strings.Contains(response, "sorted") {
+		dod.Properties = append(dod.Properties, PropertyTest{
+			Name:        "idempotent",
+			Description: "Idempotent property: applying twice same as once",
+		})
+	}
+
+	// Check for commutativity
+	if strings.Contains(response, "commutative") ||
+		strings.Contains(response, "order") && strings.Contains(response, "matter") {
+		dod.Properties = append(dod.Properties, PropertyTest{
+			Name:        "commutative",
+			Description: "Commutative property: order of arguments doesn't matter",
+		})
+	}
+
+	// Check for invariants
+	if strings.Contains(response, "invariant") ||
+		strings.Contains(response, "always") && (strings.Contains(response, "positive") || strings.Contains(response, "non-negative")) {
+		dod.Properties = append(dod.Properties, PropertyTest{
+			Name:        "invariant",
+			Description: "Invariant property: condition always holds",
+		})
+	}
+}
+
 // HasTestableRequirements checks if DoD has anything we can actually test
 func (d *DefinitionOfDone) HasTestableRequirements() bool {
 	return len(d.Examples) > 0 ||
+		len(d.Properties) > 0 ||
 		d.HandleEmpty ||
 		d.HandleNegative ||
 		d.ThreadSafe ||
@@ -244,6 +308,13 @@ func (d *DefinitionOfDone) FormatDoDSummary() string {
 
 	if len(d.Examples) > 0 {
 		parts = append(parts, fmt.Sprintf("%d example test(s)", len(d.Examples)))
+	}
+	if len(d.Properties) > 0 {
+		propNames := make([]string, len(d.Properties))
+		for i, p := range d.Properties {
+			propNames[i] = p.Name
+		}
+		parts = append(parts, fmt.Sprintf("properties: %s", strings.Join(propNames, ", ")))
 	}
 	if d.HandleEmpty {
 		parts = append(parts, "handle empty input")

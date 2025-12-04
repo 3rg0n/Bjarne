@@ -18,6 +18,7 @@ type State int
 const (
 	StateInput State = iota
 	StateThinking
+	StateOracle        // Deep analysis with Opus for COMPLEX tasks
 	StateAcknowledging
 	StateCollectingDoD // Waiting for Definition of Done from user
 	StateGenerating
@@ -129,6 +130,11 @@ type acknowledgeDoneMsg struct {
 }
 
 type dodDoneMsg struct {
+	result *GenerateResult
+	err    error
+}
+
+type oracleDoneMsg struct {
 	result *GenerateResult
 	err    error
 }
@@ -362,8 +368,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.startGenerating()
 		}
 
+		if difficulty == "COMPLEX" {
+			// For COMPLEX: launch Oracle (Opus) for deep architectural analysis
+			m.addOutput("")
+			m.addOutput(m.styles.Accent.Render("Engaging Oracle mode for deep architectural analysis..."))
+			return m.startOracle()
+		}
+
 		// For MEDIUM: user responds, then generate
-		// For COMPLEX: user responds to clarification, then we ask for DoD
 		m.analyzed = true // Next input goes to acknowledgment
 		m.state = StateInput
 		m.textarea.Focus()
@@ -394,6 +406,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Proceed to generation
 		m.conversation = append(m.conversation, Message{Role: "user", Content: GenerateNowPrompt})
 		return m.startGenerating()
+
+	case oracleDoneMsg:
+		if msg.err != nil {
+			if m.ctx.Err() == context.Canceled {
+				return m, nil
+			}
+			m.addOutput(m.styles.Error.Render("Oracle analysis failed: " + msg.err.Error()))
+			m.state = StateInput
+			m.textarea.Focus()
+			return m, nil
+		}
+		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
+		m.conversation = append(m.conversation, Message{Role: "assistant", Content: msg.result.Text})
+
+		// Show Oracle analysis
+		m.addOutput("")
+		m.drawBox("ARCHITECTURAL ANALYSIS (Oracle)", 56)
+		m.addOutput("")
+
+		// Display Oracle analysis with word wrapping
+		cleanText := stripMarkdown(msg.result.Text)
+		lines := wrapText(cleanText, 76)
+		for _, line := range lines {
+			m.addOutput(line)
+		}
+		m.addOutput("")
+
+		// After Oracle analysis, ask for Definition of Done
+		m.analyzed = true
+		return m.startCollectingDoD()
 
 	case dodDoneMsg:
 		if msg.err != nil {
@@ -546,7 +588,7 @@ func (m Model) View() string {
 		b.WriteString(m.styles.Warning.Render("DoD>") + " ")
 		b.WriteString(m.textarea.View())
 
-	case StateThinking, StateAcknowledging, StateGenerating, StateValidating, StateFixing:
+	case StateThinking, StateOracle, StateAcknowledging, StateGenerating, StateValidating, StateFixing:
 		elapsed := time.Since(m.startTime).Seconds()
 		status := fmt.Sprintf("esc to interrupt · %.0fs", elapsed)
 		if m.tokenCount > 0 {
@@ -631,6 +673,30 @@ func (m *Model) doThinking(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.bedrock.GenerateWithModel(ctx, m.config.ChatModel, ReflectionSystemPrompt, m.conversation, m.config.MaxTokens)
 		return thinkingDoneMsg{result: result, err: err}
+	}
+}
+
+func (m *Model) startOracle() (Model, tea.Cmd) {
+	m.state = StateOracle
+	m.statusMsg = fmt.Sprintf("Oracle analysis with %s…", shortModelName(m.config.OracleModel))
+	m.startTime = time.Now()
+	m.tokenCount = 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.ctx = ctx
+	m.cancelFn = cancel
+
+	return *m, tea.Batch(
+		m.spinner.Tick,
+		m.doOracle(ctx),
+		tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
+	)
+}
+
+func (m *Model) doOracle(ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		result, err := m.bedrock.GenerateWithModel(ctx, m.config.OracleModel, OracleSystemPrompt, m.conversation, m.config.MaxTokens)
+		return oracleDoneMsg{result: result, err: err}
 	}
 }
 
@@ -734,8 +800,8 @@ func (m *Model) startValidation() (Model, tea.Cmd) {
 
 func (m *Model) doValidation(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
-		// Use example-based validation if we have examples
-		results, err := m.container.ValidateCodeWithExamples(ctx, m.currentCode, "code.cpp", m.examples, nil)
+		// Use full validation with examples and DoD
+		results, err := m.container.ValidateCodeWithExamples(ctx, m.currentCode, "code.cpp", m.examples, m.dod)
 		return validationDoneMsg{results: results, err: err}
 	}
 }

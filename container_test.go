@@ -119,3 +119,61 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+func TestDetectBenchmarkFunction(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		examples *ExampleTests
+		want     string
+	}{
+		{
+			name: "with examples",
+			code: "int factorial(int n) { return n <= 1 ? 1 : n * factorial(n-1); }",
+			examples: &ExampleTests{
+				FunctionName: "factorial",
+				Tests:        []TestCase{{FunctionCall: "factorial(5)", Expected: "120"}},
+			},
+			want: "factorial(5)",
+		},
+		{
+			name:     "detect int function",
+			code:     "int compute() { return 42; }\nint main() { return 0; }",
+			examples: nil,
+			want:     "compute()",
+		},
+		{
+			name:     "detect void function",
+			code:     "void doWork() { /* work */ }\nint main() { doWork(); return 0; }",
+			examples: nil,
+			want:     "doWork()",
+		},
+		{
+			name:     "detect bool function",
+			code:     "bool isValid() { return true; }\nint main() { return 0; }",
+			examples: nil,
+			want:     "isValid()",
+		},
+		{
+			name:     "only main - no detection",
+			code:     "int main() { return 0; }",
+			examples: nil,
+			want:     "",
+		},
+		{
+			name:     "examples with function name only",
+			code:     "int foo() { return 1; }",
+			examples: &ExampleTests{FunctionName: "foo"},
+			want:     "foo()",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectBenchmarkFunction(tt.code, tt.examples)
+			if got != tt.want {
+				t.Errorf("detectBenchmarkFunction() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

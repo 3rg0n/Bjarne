@@ -169,3 +169,117 @@ func TestGenerateBenchmarkHarness(t *testing.T) {
 		t.Error("Harness should call the function")
 	}
 }
+
+func TestParseProperties(t *testing.T) {
+	tests := []struct {
+		name       string
+		response   string
+		wantProps  []string
+		wantCount  int
+	}{
+		{
+			name:      "roundtrip property",
+			response:  "yes, it should have roundtrip property - encode then decode gives original",
+			wantProps: []string{"roundtrip"},
+			wantCount: 1,
+		},
+		{
+			name:      "idempotent property",
+			response:  "sorting should be idempotent - sorting twice is same as once",
+			wantProps: []string{"idempotent"},
+			wantCount: 1,
+		},
+		{
+			name:      "commutative property",
+			response:  "the operation is commutative, order doesn't matter",
+			wantProps: []string{"commutative"},
+			wantCount: 1,
+		},
+		{
+			name:      "invariant property",
+			response:  "there's an invariant - size is always positive",
+			wantProps: []string{"invariant"},
+			wantCount: 1,
+		},
+		{
+			name:      "multiple properties",
+			response:  "it should be idempotent and have a roundtrip with its inverse",
+			wantProps: []string{"roundtrip", "idempotent"},
+			wantCount: 2,
+		},
+		{
+			name:      "reverse twice pattern",
+			response:  "reverse twice should give the original back",
+			wantProps: []string{"roundtrip"},
+			wantCount: 1,
+		},
+		{
+			name:      "encode decode pattern",
+			response:  "encode and decode should preserve the data",
+			wantProps: []string{"roundtrip"},
+			wantCount: 1,
+		},
+		{
+			name:      "no properties",
+			response:  "just a simple function with no special properties",
+			wantProps: []string{},
+			wantCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dod := ParseDefinitionOfDone(tt.response)
+
+			if len(dod.Properties) != tt.wantCount {
+				t.Errorf("Properties count: got %d, want %d", len(dod.Properties), tt.wantCount)
+			}
+
+			for _, wantProp := range tt.wantProps {
+				found := false
+				for _, prop := range dod.Properties {
+					if prop.Name == wantProp {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected property %q not found", wantProp)
+				}
+			}
+		})
+	}
+}
+
+func TestDoDHasTestableRequirementsWithProperties(t *testing.T) {
+	dod := &DefinitionOfDone{
+		Properties: []PropertyTest{
+			{Name: "roundtrip", Description: "Roundtrip property"},
+		},
+	}
+
+	if !dod.HasTestableRequirements() {
+		t.Error("DoD with properties should have testable requirements")
+	}
+}
+
+func TestDoDFormatSummaryWithProperties(t *testing.T) {
+	dod := &DefinitionOfDone{
+		Properties: []PropertyTest{
+			{Name: "roundtrip", Description: "Roundtrip property"},
+			{Name: "idempotent", Description: "Idempotent property"},
+		},
+	}
+
+	summary := dod.FormatDoDSummary()
+
+	if !strings.Contains(summary, "properties:") {
+		t.Error("Summary should mention properties")
+	}
+	if !strings.Contains(summary, "roundtrip") {
+		t.Error("Summary should mention roundtrip property")
+	}
+	if !strings.Contains(summary, "idempotent") {
+		t.Error("Summary should mention idempotent property")
+	}
+}

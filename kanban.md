@@ -1,6 +1,6 @@
 # Kanban Board
 
-_Last updated: 2025-12-03_
+_Last updated: 2025-12-04_
 
 **Project:** bjarne — AI-Assisted C/C++ Development with Validation Gates
 
@@ -31,6 +31,12 @@ _Last updated: 2025-12-03_
 | T-025 | Write installation documentation | 2025-12-03 |
 | T-026 | Add iteration limits / token budget | 2025-12-03 |
 | T-028 | Validate-only mode (--validate flag and /validate command) | 2025-12-03 |
+| T-029 | Production-grade validation: cppcheck, complexity, examples, DoD | 2025-12-04 |
+| T-030 | Model escalation chain (Haiku → Sonnet → Opus) | 2025-12-04 |
+| T-031 | TUI improvements: double Ctrl+C, Tab toggle, compact output | 2025-12-04 |
+| T-032 | Oracle mode for COMPLEX tasks (Opus model for architecture) | 2025-12-04 |
+| T-033 | Property-based testing (roundtrip, idempotent, etc.) | 2025-12-04 |
+| T-034 | Google Benchmark integration for performance validation | 2025-12-04 |
 
 ---
 
@@ -38,7 +44,7 @@ _Last updated: 2025-12-03_
 
 | ID | Task | Started | Owner |
 |----|------|---------|-------|
-| | (No tasks in progress) | | |
+| — | (Empty - ready for new work) | — | — |
 
 ---
 
@@ -90,20 +96,21 @@ All core workflow tasks completed (T-013, T-015, T-016 were implemented as part 
 ### Security & Quality
 | ID | Task | Notes |
 |----|------|-------|
-| T-029 | Integrate llm-guard for prompt scanning | Prompt injection, secrets, toxicity detection |
-| T-030 | Integrate codeguard safe-c-functions rules into system prompt | Ban unsafe functions |
-| T-031 | Add toolchain hardening flags to validation container | -fstack-protector-all, PIE, RELRO |
+| F-035 | Integrate llm-guard for prompt scanning | Prompt injection, secrets, toxicity detection |
+| F-036 | Integrate codeguard safe-c-functions rules into system prompt | Ban unsafe functions |
+| F-037 | Add toolchain hardening flags to validation container | -fstack-protector-all, PIE, RELRO |
 
 ### Core Enhancements
 | ID | Task | Notes |
 |----|------|-------|
-| F-001 | Multi-file project validation | Requires dependency analysis |
+| F-001 | **Multi-file project validation** | Requires dependency analysis — ICEBOX |
 | F-002 | External library support | Header-only vs linked |
 | F-003 | IDE integration (VSCode, CLion) | After CLI stable |
 | F-004 | Web interface | After CLI stable |
 | F-005 | CI/CD pipeline integration | GitHub Actions, GitLab CI |
 | F-006 | AWS Lambda/Fargate deployment | Commercialization phase |
 | F-007 | Support for other languages (.ts, .js, .py) | After C/C++ stable |
+| F-038 | MSan (MemorySanitizer) gate | Optional, disabled by default - complex setup |
 
 ### Domain-Specific Validation Gates (Future)
 | ID | Domain | Validation Types |
@@ -182,8 +189,8 @@ All core workflow tasks completed (T-013, T-015, T-016 were implemented as part 
 │   ┌──────────────────────────────────────────────────────────┐  │
 │   │                   Interactive REPL                        │  │
 │   │   You: write a thread-safe counter                       │  │
-│   │   bjarne: Generating... Validating... ✓                  │  │
-│   │   [code displayed]                                       │  │
+│   │   bjarne: [MEDIUM] Analyzing... Generating... ✓          │  │
+│   │   [code displayed - Tab to expand/collapse]              │  │
 │   │   You: /save counter.cpp                                 │  │
 │   └──────────────────────────────────────────────────────────┘  │
 │                            │                                    │
@@ -192,6 +199,10 @@ All core workflow tasks completed (T-013, T-015, T-016 were implemented as part 
 │   ┌──────────────────┐        ┌──────────────────────┐        │
 │   │  Bedrock Client  │        │  Validation Pipeline  │        │
 │   │  (Claude models) │        │  (Container orchestr) │        │
+│   │                  │        │                        │        │
+│   │  Escalation:     │        │  On fail: retry with   │        │
+│   │  Haiku → Sonnet  │◄──────►│  stronger model        │        │
+│   │  → Opus          │        │                        │        │
 │   └──────────────────┘        └──────────────────────┘        │
 │                                          │                     │
 └──────────────────────────────────────────┼─────────────────────┘
@@ -199,15 +210,21 @@ All core workflow tasks completed (T-013, T-015, T-016 were implemented as part 
                                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   bjarne-validator Container                    │
-│                         (ghcr.io)                               │
+│                         (local or ghcr.io)                      │
 ├─────────────────────────────────────────────────────────────────┤
-│  Pipeline: clang-tidy → compile → ASAN → UBSAN → [TSAN] → run  │
+│  Pipeline:                                                      │
+│    clang-tidy → cppcheck → IWYU → complexity (lizard)          │
+│    → compile → ASAN → UBSAN → [TSAN] → [examples] → [bench]    │
+│    → run                                                        │
 │                                                                 │
-│  • Clang 18+ (clang++, clang-tidy)                             │
+│  • Clang 21 (clang++, clang-tidy)                              │
+│  • cppcheck (deep static analysis)                             │
+│  • lizard (complexity metrics: CCN≤15, length≤100)             │
 │  • AddressSanitizer (ASAN)                                     │
 │  • UndefinedBehaviorSanitizer (UBSAN)                          │
 │  • ThreadSanitizer (TSAN) — if threads detected                │
-│  • MemorySanitizer (MSAN) — Linux only                         │
+│  • Example-based tests — if examples in prompt/DoD             │
+│  • Benchmark gate — if performance requirements in DoD         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

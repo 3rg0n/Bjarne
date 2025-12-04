@@ -21,6 +21,8 @@ type ModelSettings struct {
 	Chat string `json:"chat"`
 	// Generate is used for initial code generation
 	Generate string `json:"generate"`
+	// Oracle is used for deep architectural analysis (COMPLEX tasks)
+	Oracle string `json:"oracle"`
 	// Escalation is a list of models to try when validation fails (in order)
 	Escalation []string `json:"escalation"`
 }
@@ -69,6 +71,7 @@ func DefaultSettings() *Settings {
 		Models: ModelSettings{
 			Chat:     "global.anthropic.claude-haiku-4-5-20251001-v1:0",
 			Generate: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+			Oracle:   "global.anthropic.claude-opus-4-5-20251101-v1:0",
 			Escalation: []string{
 				"global.anthropic.claude-sonnet-4-5-20250929-v1:0",
 				"global.anthropic.claude-opus-4-5-20251101-v1:0",
