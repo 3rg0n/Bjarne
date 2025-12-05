@@ -59,6 +59,10 @@ RUN git clone --depth 1 --branch main https://github.com/llvm/llvm-project.git /
         -DCMAKE_BUILD_TYPE=Release \
         -DLIBCXX_ENABLE_SHARED=OFF \
         -DLIBCXXABI_ENABLE_SHARED=OFF \
+        -DLIBCXX_INCLUDE_TESTS=OFF \
+        -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
+        -DLIBCXXABI_INCLUDE_TESTS=OFF \
+        -DLIBUNWIND_INCLUDE_TESTS=OFF \
     && ninja -C /tmp/llvm/build cxx cxxabi \
     && mkdir -p /opt/msan \
     && cp -r /tmp/llvm/build/include /opt/msan/ \
