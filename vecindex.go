@@ -403,14 +403,12 @@ func (vi *VectorIndex) IndexWorkspaceWithEmbeddings(ctx context.Context, rootPat
 }
 
 // extractChunks extracts code chunks from file content
+// Uses brace matching for accurate function/class boundaries
 func extractChunks(content string, fileID int64, filePath string) []CodeChunk {
 	var chunks []CodeChunk
 	lines := strings.Split(content, "\n")
 
-	// For now, use simple function/class extraction
-	// This can be enhanced with proper AST parsing later
-
-	// Extract using existing regex patterns from index.go
+	// Extract functions with brace matching
 	funcMatches := funcPattern.FindAllStringSubmatchIndex(content, -1)
 	for _, match := range funcMatches {
 		if len(match) >= 8 {
@@ -420,13 +418,15 @@ func extractChunks(content string, fileID int64, filePath string) []CodeChunk {
 			}
 
 			startLine := strings.Count(content[:match[0]], "\n") + 1
-			// Find end of function (simple heuristic: next function or EOF)
-			endLine := startLine + 20 // Default chunk size
+			// Find actual end using brace matching
+			endLine := findBlockEnd(content, match[0], len(lines))
+			if endLine < startLine {
+				endLine = startLine + 20 // Fallback
+			}
 			if endLine > len(lines) {
 				endLine = len(lines)
 			}
 
-			// Extract function content with context
 			chunkContent := strings.Join(lines[startLine-1:endLine], "\n")
 
 			chunks = append(chunks, CodeChunk{
@@ -440,14 +440,16 @@ func extractChunks(content string, fileID int64, filePath string) []CodeChunk {
 		}
 	}
 
-	// Extract classes
+	// Extract classes with brace matching
 	classMatches := classPattern.FindAllStringSubmatchIndex(content, -1)
 	for _, match := range classMatches {
 		if len(match) >= 4 {
 			className := content[match[2]:match[3]]
 			startLine := strings.Count(content[:match[0]], "\n") + 1
-			endLine := startLine + 50 // Class chunks are larger
-
+			endLine := findBlockEnd(content, match[0], len(lines))
+			if endLine < startLine {
+				endLine = startLine + 50
+			}
 			if endLine > len(lines) {
 				endLine = len(lines)
 			}
@@ -465,14 +467,16 @@ func extractChunks(content string, fileID int64, filePath string) []CodeChunk {
 		}
 	}
 
-	// Extract structs
+	// Extract structs with brace matching
 	structMatches := structPattern.FindAllStringSubmatchIndex(content, -1)
 	for _, match := range structMatches {
 		if len(match) >= 4 {
 			structName := content[match[2]:match[3]]
 			startLine := strings.Count(content[:match[0]], "\n") + 1
-			endLine := startLine + 30
-
+			endLine := findBlockEnd(content, match[0], len(lines))
+			if endLine < startLine {
+				endLine = startLine + 30
+			}
 			if endLine > len(lines) {
 				endLine = len(lines)
 			}
@@ -508,6 +512,34 @@ func extractChunks(content string, fileID int64, filePath string) []CodeChunk {
 	}
 
 	return chunks
+}
+
+// findBlockEnd finds the end line of a code block using brace matching
+func findBlockEnd(content string, startPos int, _ int) int { // maxLines reserved
+	braceCount := 0
+	foundOpen := false
+	lineNum := strings.Count(content[:startPos], "\n") + 1
+
+	for i := startPos; i < len(content); i++ {
+		switch content[i] {
+		case '{':
+			braceCount++
+			foundOpen = true
+		case '}':
+			braceCount--
+			if foundOpen && braceCount == 0 {
+				// Found matching close brace
+				return strings.Count(content[:i+1], "\n") + 1
+			}
+		case '\n':
+			lineNum++
+			// Safety limit - don't scan more than 200 lines
+			if lineNum > strings.Count(content[:startPos], "\n")+200 {
+				return -1
+			}
+		}
+	}
+	return -1 // Not found
 }
 
 // generateEmbeddings generates embeddings for chunks in batches
@@ -572,7 +604,8 @@ func (vi *VectorIndex) generateEmbeddings(ctx context.Context, chunks []CodeChun
 	return tx.Commit()
 }
 
-// SearchSimilar finds chunks similar to the query
+// SearchSimilar finds chunks similar to the query using hybrid search
+// Combines semantic similarity with keyword matching for better results
 func (vi *VectorIndex) SearchSimilar(ctx context.Context, query string, topK int) ([]CodeChunk, error) {
 	if vi.embedder == nil {
 		return nil, fmt.Errorf("embedder not initialized")
@@ -583,6 +616,9 @@ func (vi *VectorIndex) SearchSimilar(ctx context.Context, query string, topK int
 	if err != nil {
 		return nil, fmt.Errorf("failed to embed query: %w", err)
 	}
+
+	// Extract keywords from query for hybrid search
+	keywords := extractKeywords(query)
 
 	// Brute force search (replace with sqlite-vec when available)
 	rows, err := vi.db.QueryContext(ctx, `
@@ -611,8 +647,15 @@ func (vi *VectorIndex) SearchSimilar(ctx context.Context, query string, topK int
 		}
 
 		chunkEmb := bytesToFloat32s(vectorBlob)
-		score := cosineSimilarity(queryEmb, chunkEmb)
-		scored = append(scored, scoredChunk{chunk, score})
+
+		// Hybrid scoring: semantic similarity + keyword boost
+		semanticScore := cosineSimilarity(queryEmb, chunkEmb)
+		keywordScore := keywordMatchScore(chunk.Content, chunk.Name, keywords)
+
+		// Combined score: 70% semantic, 30% keyword (with boost for exact matches)
+		combinedScore := semanticScore*0.7 + keywordScore*0.3
+
+		scored = append(scored, scoredChunk{chunk, combinedScore})
 	}
 
 	// Sort by score descending
@@ -624,13 +667,84 @@ func (vi *VectorIndex) SearchSimilar(ctx context.Context, query string, topK int
 		}
 	}
 
-	// Return top K
+	// Return top K with deduplication (avoid overlapping chunks from same file)
 	result := make([]CodeChunk, 0, topK)
-	for i := 0; i < len(scored) && i < topK; i++ {
-		result = append(result, scored[i].chunk)
+	seen := make(map[string]bool)
+	for i := 0; i < len(scored) && len(result) < topK; i++ {
+		// Create key based on file and line range to avoid duplicates
+		key := fmt.Sprintf("%d:%d-%d", scored[i].chunk.FileID, scored[i].chunk.StartLine, scored[i].chunk.EndLine)
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, scored[i].chunk)
+		}
 	}
 
 	return result, nil
+}
+
+// extractKeywords extracts meaningful keywords from a query
+func extractKeywords(query string) []string {
+	// Common words to skip
+	stopWords := map[string]bool{
+		"a": true, "an": true, "the": true, "is": true, "are": true, "was": true,
+		"be": true, "been": true, "being": true, "have": true, "has": true, "had": true,
+		"do": true, "does": true, "did": true, "will": true, "would": true, "could": true,
+		"should": true, "may": true, "might": true, "must": true, "shall": true,
+		"to": true, "of": true, "in": true, "for": true, "on": true, "with": true,
+		"at": true, "by": true, "from": true, "as": true, "into": true, "through": true,
+		"and": true, "or": true, "but": true, "if": true, "then": true, "else": true,
+		"when": true, "where": true, "why": true, "how": true, "what": true, "which": true,
+		"this": true, "that": true, "these": true, "those": true, "it": true, "its": true,
+		"i": true, "me": true, "my": true, "we": true, "our": true, "you": true, "your": true,
+		"create": true, "make": true, "write": true, "implement": true, "add": true,
+		"code": true, "function": true, "class": true, "method": true, "program": true,
+	}
+
+	words := strings.FieldsFunc(strings.ToLower(query), func(r rune) bool {
+		return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_')
+	})
+
+	var keywords []string
+	for _, word := range words {
+		if len(word) >= 3 && !stopWords[word] {
+			keywords = append(keywords, word)
+		}
+	}
+	return keywords
+}
+
+// keywordMatchScore calculates how well content matches query keywords
+func keywordMatchScore(content, name string, keywords []string) float32 {
+	if len(keywords) == 0 {
+		return 0
+	}
+
+	contentLower := strings.ToLower(content)
+	nameLower := strings.ToLower(name)
+
+	var score float32
+	for _, kw := range keywords {
+		// Name match is worth more (exact match in function/class name)
+		if strings.Contains(nameLower, kw) {
+			score += 0.5
+		}
+		// Content match
+		count := strings.Count(contentLower, kw)
+		if count > 0 {
+			// Diminishing returns for multiple matches
+			score += 0.1 * float32(min(count, 5))
+		}
+	}
+
+	// Normalize to 0-1 range
+	maxScore := float32(len(keywords)) * 0.6
+	if maxScore > 0 {
+		score = score / maxScore
+	}
+	if score > 1.0 {
+		score = 1.0
+	}
+	return score
 }
 
 // GetStats returns statistics about the index
