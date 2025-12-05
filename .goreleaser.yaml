@@ -65,6 +65,49 @@ release:
   draft: false
   prerelease: auto
   name_template: "v{{.Version}}"
+  header: |
+    ## bjarne {{ .Version }}
+
+    AI-assisted C/C++ code generation with mandatory validation using Clang sanitizers.
+
+    ### Installation
+
+    **macOS/Linux (Homebrew):**
+    ```bash
+    brew install 3rg0n/tap/bjarne
+    ```
+
+    **Windows (Scoop):**
+    ```powershell
+    scoop bucket add bjarne https://github.com/3rg0n/scoop-bucket
+    scoop install bjarne
+    ```
+
+    **Windows (PowerShell one-liner):**
+    ```powershell
+    irm https://raw.githubusercontent.com/3rg0n/bjarne/master/install.ps1 | iex
+    ```
+
+    **Or download a binary below** and add to your PATH.
+
+    ### Requirements
+    - **Podman** or **Docker** (for validation container)
+    - **LLM Provider** (one of):
+      - AWS Bedrock (default) - requires AWS credentials
+      - Anthropic API - set `BJARNE_PROVIDER=anthropic` and `BJARNE_API_KEY`
+      - OpenAI API - set `BJARNE_PROVIDER=openai` and `BJARNE_API_KEY`
+      - Google Gemini - set `BJARNE_PROVIDER=gemini` and `BJARNE_API_KEY`
+
+    ### Quick Start
+    ```bash
+    bjarne
+    > write a thread-safe counter in C++
+    ```
+    On first run, bjarne will prompt to download the validation container (~500MB).
+  footer: |
+
+    ---
+    **Full documentation:** https://github.com/3rg0n/bjarne
 
 # Homebrew tap
 brews:
