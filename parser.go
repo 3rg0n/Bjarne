@@ -143,9 +143,10 @@ func ParseSanitizerOutput(output string, sanitizerType string) []Diagnostic {
 			continue
 		}
 
-		// ASAN/TSAN summary line
+		// ASAN/MSAN/TSAN summary line
 		if strings.Contains(line, "ERROR: AddressSanitizer:") ||
 			strings.Contains(line, "ERROR: LeakSanitizer:") ||
+			strings.Contains(line, "WARNING: MemorySanitizer:") ||
 			strings.Contains(line, "WARNING: ThreadSanitizer:") {
 
 			if currentDiag != nil {
@@ -339,6 +340,7 @@ func extractSanitizerMessage(line string) string {
 	patterns := []string{
 		"ERROR: AddressSanitizer: ",
 		"ERROR: LeakSanitizer: ",
+		"WARNING: MemorySanitizer: ",
 		"WARNING: ThreadSanitizer: ",
 	}
 

@@ -88,7 +88,7 @@ DO NOT generate code yet. Just acknowledge.`
 
 // GenerationSystemPrompt is CLEAN - no personality, just technical instructions
 // This is for code generation where we want focused, correct output
-const GenerationSystemPrompt = `Generate C++ code. Your code will be validated through clang-tidy, ASAN, UBSAN, and TSAN.
+const GenerationSystemPrompt = `Generate C++ code. Your code will be validated through clang-tidy, ASAN, UBSAN, TSAN, and MSan.
 
 RULES:
 1. Generate ONLY valid, compilable C++ code (C++17 or later)
@@ -98,6 +98,16 @@ RULES:
 5. Avoid undefined behavior
 6. Handle memory safely (RAII, smart pointers)
 7. If using threads, ensure proper synchronization
+
+BANNED C FUNCTIONS (use safe alternatives):
+- NEVER use gets() - use fgets() or std::getline()
+- NEVER use strcpy/strcat - use snprintf() or std::string
+- NEVER use sprintf/vsprintf - use snprintf()
+- NEVER use scanf("%s") without width - use fgets() + sscanf()
+- NEVER use strtok() - use strtok_r() or std::string methods
+- Prefer std::string, std::vector over raw char arrays
+- Prefer std::array over C arrays
+- Use std::string_view for non-owning string references
 
 OUTPUT:
 - Wrap code in a single cpp code block
@@ -109,8 +119,9 @@ VALIDATION GATES:
 - cppcheck: Deep analysis (uninitialized vars, null derefs, leaks)
 - Complexity: Functions CCN <= 15, length <= 100 lines
 - Compile: -Wall -Wextra -Werror -std=c++17
-- ASAN: Memory errors
-- UBSAN: Undefined behavior
+- ASAN: Memory errors (heap/stack overflow, use-after-free)
+- UBSAN: Undefined behavior (signed overflow, null deref)
+- MSan: Uninitialized memory reads
 - TSAN: Data races (if threads detected)
 
 Write code that passes ALL checks.`
@@ -122,7 +133,7 @@ Errors:
 %s
 
 Requirements:
-- Must pass clang-tidy, cppcheck, ASAN, UBSAN, TSAN
+- Must pass clang-tidy, cppcheck, ASAN, UBSAN, MSan, TSAN
 - Functions: CCN <= 15, length <= 100 lines
 - Same functionality
 

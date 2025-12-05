@@ -291,7 +291,18 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 		return results, nil
 	}
 
-	// Stage 8: Check if code uses threads, run TSAN if so
+	// Stage 8: MSan (MemorySanitizer) - detects uninitialized memory reads
+	// Note: MSan requires code to not link against uninstrumented libraries
+	// We use -stdlib=libc++ for better MSan compatibility
+	result = runStage("msan",
+		"sh", "-c",
+		"clang++ -std=c++17 -fsanitize=memory -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
+	results = append(results, result)
+	if !result.Success {
+		return results, nil
+	}
+
+	// Stage 9: Check if code uses threads, run TSAN if so
 	if codeUsesThreads(code) {
 		result = runStage("tsan",
 			"sh", "-c",
@@ -479,6 +490,11 @@ func formatStageError(stage, errorOutput string) string {
 		if len(diags) > 0 {
 			return FormatDiagnostics(diags)
 		}
+	case "msan":
+		diags := ParseSanitizerOutput(errorOutput, "msan")
+		if len(diags) > 0 {
+			return FormatDiagnostics(diags)
+		}
 	case "tsan":
 		diags := ParseSanitizerOutput(errorOutput, "tsan")
 		if len(diags) > 0 {
@@ -509,6 +525,8 @@ func FormatErrorForLLM(stage, errorOutput string) string {
 		diags = ParseSanitizerOutput(errorOutput, "asan")
 	case "ubsan":
 		diags = ParseSanitizerOutput(errorOutput, "ubsan")
+	case "msan":
+		diags = ParseSanitizerOutput(errorOutput, "msan")
 	case "tsan":
 		diags = ParseSanitizerOutput(errorOutput, "tsan")
 	case "compile":

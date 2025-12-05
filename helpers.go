@@ -102,8 +102,32 @@ func saveToFile(filename, code string) error {
 
 // stripMarkdown removes common markdown formatting from text for terminal display
 func stripMarkdown(text string) string {
+	// Remove code blocks entirely (```...```)
+	re := regexp.MustCompile("(?s)```[a-z]*\\s*\n.*?```")
+	text = re.ReplaceAllString(text, "")
+
+	// Remove headers (# ## ### etc) - keep the text
+	re = regexp.MustCompile(`(?m)^#{1,6}\s+`)
+	text = re.ReplaceAllString(text, "")
+
+	// Remove horizontal rules (--- or ***)
+	re = regexp.MustCompile(`(?m)^[-*]{3,}\s*$`)
+	text = re.ReplaceAllString(text, "")
+
+	// Remove table formatting - convert to simple lines
+	// First, remove table separator lines (|---|---|)
+	re = regexp.MustCompile(`(?m)^\|[-:|\s]+\|\s*$`)
+	text = re.ReplaceAllString(text, "")
+	// Then clean up table rows (| cell | cell |) -> cell, cell
+	re = regexp.MustCompile(`(?m)^\|\s*`)
+	text = re.ReplaceAllString(text, "")
+	re = regexp.MustCompile(`(?m)\s*\|$`)
+	text = re.ReplaceAllString(text, "")
+	re = regexp.MustCompile(`\s*\|\s*`)
+	text = re.ReplaceAllString(text, " | ")
+
 	// Remove bold (**text** or __text__)
-	re := regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	re = regexp.MustCompile(`\*\*([^*]+)\*\*`)
 	text = re.ReplaceAllString(text, "$1")
 	re = regexp.MustCompile(`__([^_]+)__`)
 	text = re.ReplaceAllString(text, "$1")
@@ -116,7 +140,11 @@ func stripMarkdown(text string) string {
 	re = regexp.MustCompile("`([^`]+)`")
 	text = re.ReplaceAllString(text, "$1")
 
-	return text
+	// Clean up multiple blank lines
+	re = regexp.MustCompile(`\n{3,}`)
+	text = re.ReplaceAllString(text, "\n\n")
+
+	return strings.TrimSpace(text)
 }
 
 // wrapText wraps text to a specified width, preserving paragraph breaks

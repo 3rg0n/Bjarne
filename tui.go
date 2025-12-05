@@ -413,13 +413,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		code := extractCode(msg.result.Text)
 		if code == "" {
+			// No code extracted - show non-code response parts only
 			m.addOutput("")
-			m.addOutput(m.styles.Info.Render("bjarne: ") + stripMarkdown(msg.result.Text))
+			cleaned := stripMarkdown(msg.result.Text)
+			if cleaned != "" {
+				m.addOutput(m.styles.Info.Render("bjarne: ") + cleaned)
+			} else {
+				m.addOutput(m.styles.Warning.Render("No code block found in response."))
+			}
 			m.state = StateInput
 			m.textarea.Focus()
 			return m, nil
 		}
 
+		// Code extracted - go straight to validation (don't show code yet)
 		m.currentCode = code
 		return m.startValidation()
 
@@ -667,7 +674,7 @@ func (m *Model) getModelForComplexity(difficulty string) string {
 
 func (m *Model) startThinking(model string) (Model, tea.Cmd) {
 	m.state = StateThinking
-	m.statusMsg = fmt.Sprintf("Analyzing with %s…", shortModelName(model))
+	m.statusMsg = "Analyzing…"
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
