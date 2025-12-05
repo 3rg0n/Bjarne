@@ -62,7 +62,7 @@ func TestGeminiProvider(t *testing.T) {
 	cfg := &ProviderConfig{
 		Provider: ProviderGemini,
 		APIKey:   apiKey,
-		Models:   ModelSettings{Generate: "gemini-2.0-flash"},
+		Models:   ModelSettings{Generate: "gemini-2.5-flash"},
 	}
 
 	provider, err := NewProvider(ctx, cfg)
@@ -76,7 +76,7 @@ func TestGeminiProvider(t *testing.T) {
 		{Role: "user", Content: "Say 'Hello from bjarne!' - respond with exactly those 3 words."},
 	}
 
-	result, err := provider.Generate(ctx, "gemini-2.0-flash", "You are a helpful assistant. Follow instructions exactly.", messages, 50)
+	result, err := provider.Generate(ctx, "gemini-2.5-flash", "You are a helpful assistant. Follow instructions exactly.", messages, 50)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}

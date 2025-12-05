@@ -103,11 +103,10 @@ var OpenAIModelMap = map[string]string{
 }
 
 // GeminiModelMap maps canonical names to Gemini model IDs
-// Using currently available models
 var GeminiModelMap = map[string]string{
-	ModelHaiku:  "gemini-2.0-flash-lite", // Fast, cost-effective
-	ModelSonnet: "gemini-2.0-flash",      // Balanced performance
-	ModelOpus:   "gemini-2.0-pro",        // Most capable
+	ModelHaiku:  "gemini-2.5-flash",       // Fast, cost-effective
+	ModelSonnet: "gemini-2.5-pro",         // Balanced performance
+	ModelOpus:   "gemini-3-pro-preview",   // Most capable, with thinking
 }
 
 // MapModelGeneric maps a canonical model name using the appropriate provider map
