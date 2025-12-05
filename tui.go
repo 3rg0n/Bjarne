@@ -22,7 +22,8 @@ const (
 	StateAcknowledging       // Processing user's response to clarifying questions
 	StateGenerating
 	StateValidating
-	StateFixing // Attempting to fix failed code
+	StateFixing   // Attempting to fix failed code
+	StateRevealing // Animated code reveal
 )
 
 // Box drawing characters for visual sections
@@ -96,6 +97,11 @@ type Model struct {
 	// Exit confirmation
 	ctrlCPressed bool      // True if Ctrl+C was pressed once
 	ctrlCTime    time.Time // When Ctrl+C was pressed (for timeout)
+
+	// Code reveal animation
+	revealLines       []string // Lines to reveal
+	revealCurrentLine int      // Current line being revealed
+	revealTotalTime   float64  // Total validation time to show after reveal
 
 	// Session data
 	bedrock      *BedrockClient
@@ -444,10 +450,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.validated = true
 			m.analyzed = false // Reset for next prompt
 			m.resetEscalation()
-			m.showValidationSuccess(msg.results)
-			m.state = StateInput
-			m.textarea.Focus()
-			return m, textarea.Blink
+
+			// Start animated code reveal
+			totalTime := m.showValidationSuccess(msg.results)
+			m.revealTotalTime = totalTime
+			m.revealLines = strings.Split(m.currentCode, "\n")
+			m.revealCurrentLine = 0
+			m.state = StateRevealing
+
+			// Start the reveal animation
+			return m, func() tea.Msg {
+				return codeRevealMsg{
+					lines:       m.revealLines,
+					currentLine: 0,
+				}
+			}
 		}
 
 		// Validation failed - check if escalation is enabled and we can retry
@@ -501,6 +518,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(time.Second, func(t time.Time) tea.Msg {
 			return tickMsg(t)
 		})
+
+	case codeRevealMsg:
+		// Reveal next line of code
+		if msg.currentLine < len(msg.lines) {
+			m.addOutput(msg.lines[msg.currentLine])
+			m.revealCurrentLine = msg.currentLine + 1 // Update progress for View
+			// Continue with next line after short delay
+			return m, tea.Tick(time.Millisecond*30, func(t time.Time) tea.Msg {
+				return codeRevealMsg{
+					lines:       msg.lines,
+					currentLine: msg.currentLine + 1,
+				}
+			})
+		}
+		// All lines revealed, send done message
+		return m, func() tea.Msg { return codeRevealDoneMsg{} }
+
+	case codeRevealDoneMsg:
+		// Animation complete - show footer and return to input
+		m.addOutput("```")
+		m.addOutput("")
+		m.addOutput(fmt.Sprintf("Total validation time: %s", m.styles.Dim.Render(fmt.Sprintf("%.2fs", m.revealTotalTime))))
+		m.addOutput(fmt.Sprintf("Use %s to save", m.styles.Accent.Render("/save <filename>")))
+		m.state = StateInput
+		m.textarea.Focus()
+		return m, textarea.Blink
 	}
 
 	return m, tea.Batch(cmds...)
@@ -524,6 +567,11 @@ func (m Model) View() string {
 		b.WriteString(m.styles.Accent.Render(m.spinner.View()) + " ")
 		b.WriteString(m.statusMsg + " ")
 		b.WriteString(m.styles.Dim.Render("(" + status + ")"))
+
+	case StateRevealing:
+		progress := fmt.Sprintf("%d/%d lines", m.revealCurrentLine, len(m.revealLines))
+		b.WriteString(m.styles.Success.Render("▌ ") + "Revealing code... ")
+		b.WriteString(m.styles.Dim.Render("(" + progress + ")"))
 	}
 
 	return b.String()
@@ -904,7 +952,7 @@ func (m *Model) showEscalationExhausted() {
 	m.addOutput("You can refine your request or ask bjarne to fix specific issues.")
 }
 
-func (m *Model) showValidationSuccess(results []ValidationResult) {
+func (m *Model) showValidationSuccess(results []ValidationResult) float64 {
 	// Show gate results in tree style
 	totalTime := 0.0
 	for i, r := range results {
@@ -921,19 +969,14 @@ func (m *Model) showValidationSuccess(results []ValidationResult) {
 	m.addOutput(fmt.Sprintf("  %s All validation gates passed", m.styles.Success.Render(">>")))
 	m.addOutput("")
 
-	// Success box with full code
+	// Success box header
 	m.addOutput(strings.Repeat("=", 80))
 	m.addOutput(m.styles.Success.Render("SUCCESS! Validated code:"))
 	m.addOutput(strings.Repeat("=", 80))
-
-	// Show full code
 	m.addOutput("```cpp")
-	m.addOutput(m.currentCode)
-	m.addOutput("```")
 
-	m.addOutput("")
-	m.addOutput(fmt.Sprintf("Total validation time: %s", m.styles.Dim.Render(fmt.Sprintf("%.2fs", totalTime))))
-	m.addOutput(fmt.Sprintf("Use %s to save", m.styles.Accent.Render("/save <filename>")))
+	// Return total time - animation will handle the rest
+	return totalTime
 }
 
 func (m *Model) showValidationFailure(results []ValidationResult, isFinal bool) {
