@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 )
 
 // BedrockClient wraps the AWS Bedrock Runtime client
@@ -49,6 +50,22 @@ type GenerateResult struct {
 	Text         string
 	InputTokens  int
 	OutputTokens int
+}
+
+// StreamCallback is called for each chunk of streamed text
+type StreamCallback func(chunk string)
+
+// StreamEvent represents a streaming event from Claude
+type StreamEvent struct {
+	Type  string `json:"type"`
+	Index int    `json:"index,omitempty"`
+	Delta struct {
+		Type string `json:"type,omitempty"`
+		Text string `json:"text,omitempty"`
+	} `json:"delta,omitempty"`
+	Usage struct {
+		OutputTokens int `json:"output_tokens,omitempty"`
+	} `json:"usage,omitempty"`
 }
 
 // NewBedrockClient creates a new Bedrock client with configuration from environment
@@ -133,6 +150,72 @@ func (b *BedrockClient) GenerateWithModel(ctx context.Context, modelID, systemPr
 		Text:         text,
 		InputTokens:  response.Usage.InputTokens,
 		OutputTokens: response.Usage.OutputTokens,
+	}, nil
+}
+
+// GenerateStreaming sends a prompt and streams the response, calling callback for each chunk
+func (b *BedrockClient) GenerateStreaming(ctx context.Context, modelID, systemPrompt string, messages []Message, maxTokens int, callback StreamCallback) (*GenerateResult, error) {
+	request := ClaudeRequest{
+		AnthropicVersion: "bedrock-2023-05-31",
+		MaxTokens:        maxTokens,
+		Messages:         messages,
+		System:           systemPrompt,
+	}
+
+	requestBody, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	output, err := b.client.InvokeModelWithResponseStream(ctx, &bedrockruntime.InvokeModelWithResponseStreamInput{
+		ModelId:     aws.String(modelID),
+		Body:        requestBody,
+		ContentType: aws.String("application/json"),
+	})
+	if err != nil {
+		return nil, ErrBedrockInvoke(err)
+	}
+
+	// Process streaming events
+	var fullText string
+	var outputTokens int
+
+	stream := output.GetStream()
+	defer stream.Close()
+
+	for event := range stream.Events() {
+		switch v := event.(type) {
+		case *types.ResponseStreamMemberChunk:
+			// Parse the chunk payload
+			var streamEvent StreamEvent
+			if err := json.Unmarshal(v.Value.Bytes, &streamEvent); err != nil {
+				continue // Skip malformed events
+			}
+
+			// Handle text delta
+			if streamEvent.Type == "content_block_delta" && streamEvent.Delta.Type == "text_delta" {
+				chunk := streamEvent.Delta.Text
+				fullText += chunk
+				if callback != nil {
+					callback(chunk)
+				}
+			}
+
+			// Capture final usage
+			if streamEvent.Type == "message_delta" && streamEvent.Usage.OutputTokens > 0 {
+				outputTokens = streamEvent.Usage.OutputTokens
+			}
+		}
+	}
+
+	// Check for stream errors
+	if err := stream.Err(); err != nil {
+		return nil, fmt.Errorf("stream error: %w", err)
+	}
+
+	return &GenerateResult{
+		Text:         fullText,
+		OutputTokens: outputTokens,
 	}, nil
 }
 

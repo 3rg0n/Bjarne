@@ -107,6 +107,10 @@ type Model struct {
 	// For async operations
 	ctx      context.Context
 	cancelFn context.CancelFunc
+
+	// Terminal size
+	width  int
+	height int
 }
 
 // Messages for async operations
@@ -142,6 +146,15 @@ type fixDoneMsg struct {
 
 type tickMsg time.Time
 
+// codeRevealMsg is sent to reveal code line by line
+type codeRevealMsg struct {
+	lines       []string
+	currentLine int
+}
+
+// codeRevealDoneMsg indicates code reveal animation is complete
+type codeRevealDoneMsg struct{}
+
 // NewModel creates a new bubbletea model
 func NewModel(bedrock *BedrockClient, container *ContainerRuntime, cfg *Config) Model {
 	// Create textarea for input
@@ -149,15 +162,15 @@ func NewModel(bedrock *BedrockClient, container *ContainerRuntime, cfg *Config) 
 	ta.Placeholder = "What would you have me create?"
 	ta.Focus()
 	ta.CharLimit = 0 // No limit
-	ta.SetWidth(78)
-	ta.SetHeight(1) // Single line, grows as needed
+	ta.SetWidth(100) // Will be resized on WindowSizeMsg
+	ta.SetHeight(3)  // Allow multi-line for longer prompts
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""                                   // No prompt prefix (we draw our own >)
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle() // No highlight
 	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
 	ta.FocusedStyle.Prompt = lipgloss.NewStyle()
 	ta.BlurredStyle.Prompt = lipgloss.NewStyle()
-	ta.KeyMap.InsertNewline.SetEnabled(false) // Enter submits, no newlines
+	ta.KeyMap.InsertNewline.SetEnabled(false) // Enter submits, Shift+Enter for newlines if needed
 
 	// Create spinner - simple ASCII
 	s := spinner.New()
@@ -177,6 +190,8 @@ func NewModel(bedrock *BedrockClient, container *ContainerRuntime, cfg *Config) 
 		tokenTracker: NewTokenTracker(cfg.MaxTotalTokens, cfg.WarnTokenThreshold),
 		conversation: []Message{},
 		ctx:          context.Background(),
+		width:        120, // Default, will be updated on WindowSizeMsg
+		height:       24,
 	}
 }
 
@@ -188,6 +203,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		// Resize textarea to fit terminal width (minus prompt "> ")
+		inputWidth := msg.Width - 4 // Account for "> " prefix and some padding
+		if inputWidth < 40 {
+			inputWidth = 40
+		}
+		m.textarea.SetWidth(inputWidth)
+		return m, nil
+
 	case tea.KeyMsg:
 		// Reset Ctrl+C state on any other key press
 		if msg.Type != tea.KeyCtrlC {
