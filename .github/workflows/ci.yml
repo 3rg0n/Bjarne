@@ -80,3 +80,4 @@ jobs:
         run: |
           ./bjarne-linux-amd64 --version
           ./bjarne-linux-amd64 --help
+
