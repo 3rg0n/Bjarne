@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -1072,7 +1073,12 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 			if err := saveToFile(filename, m.currentCode); err != nil {
 				m.addOutput(m.styles.Error.Render("Error saving: " + err.Error()))
 			} else {
-				m.addOutput(m.styles.Success.Render("Saved to " + filename))
+				m.addOutput("")
+				m.addOutput(m.styles.Success.Render("✓ Saved to " + filename))
+				// Show file size for confirmation
+				if info, err := os.Stat(filename); err == nil {
+					m.addOutput(m.styles.Dim.Render(fmt.Sprintf("  %d bytes written", info.Size())))
+				}
 			}
 		}
 
