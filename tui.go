@@ -901,17 +901,6 @@ func (m *Model) startFix() (Model, tea.Cmd) {
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
-	m.addOutput("")
-	m.addOutput(m.styles.Warning.Render(fmt.Sprintf("Fixing code (attempt %d)...", attemptNum)))
-
-	// Show the errors being sent to the LLM
-	m.addOutput(m.styles.Dim.Render("Errors to fix:"))
-	for _, line := range strings.Split(m.lastValidationErrs, "\n") {
-		if line != "" {
-			m.addOutput(m.styles.Dim.Render("  " + line))
-		}
-	}
-
 	// Add fix request to conversation
 	fixPrompt := fmt.Sprintf(IterationPromptTemplate, m.lastValidationErrs)
 	m.conversation = append(m.conversation, Message{Role: "user", Content: fixPrompt})
