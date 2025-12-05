@@ -240,6 +240,19 @@ func FormatDiagnosticsForLLM(diagnostics []Diagnostic) string {
 		// Message
 		sb.WriteString(d.Message)
 		sb.WriteString("\n")
+
+		// Include context (stack traces, code snippets) if available
+		if d.Context != "" {
+			// Indent context for clarity
+			contextLines := strings.Split(d.Context, "\n")
+			for _, line := range contextLines {
+				if line != "" {
+					sb.WriteString("  ")
+					sb.WriteString(line)
+					sb.WriteString("\n")
+				}
+			}
+		}
 	}
 
 	return sb.String()

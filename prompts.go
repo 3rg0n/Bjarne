@@ -133,9 +133,15 @@ VALIDATION GATES:
 Write code that passes ALL checks.`
 
 // IterationPromptTemplate is sent when validation fails
+// %s = errors, %s = current code
 const IterationPromptTemplate = `Validation failed. Fix the code.
 
-Errors:
+CURRENT CODE:
+` + "```cpp" + `
+%s
+` + "```" + `
+
+ERRORS:
 %s
 
 Common fixes by sanitizer:

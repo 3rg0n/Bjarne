@@ -542,11 +542,12 @@ func FormatErrorForLLM(stage, errorOutput string) string {
 		return fmt.Sprintf("[%s] %s", stage, FormatDiagnosticsForLLM(diags))
 	}
 
-	// Fallback: use raw output but with stage prefix and truncated
+	// Fallback: use raw output but with stage prefix
+	// Keep more lines to not lose important context
 	lines := strings.Split(strings.TrimSpace(errorOutput), "\n")
-	if len(lines) > 10 {
-		lines = lines[:10]
-		lines = append(lines, "... (truncated)")
+	if len(lines) > 50 {
+		lines = lines[:50]
+		lines = append(lines, "... (truncated, showing first 50 lines)")
 	}
 	return fmt.Sprintf("[%s] %s", stage, strings.Join(lines, "\n"))
 }

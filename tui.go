@@ -844,8 +844,8 @@ func (m *Model) startFix() (Model, tea.Cmd) {
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
-	// Add fix request to conversation
-	fixPrompt := fmt.Sprintf(IterationPromptTemplate, m.lastValidationErrs)
+	// Add fix request to conversation with current code and errors
+	fixPrompt := fmt.Sprintf(IterationPromptTemplate, m.currentCode, m.lastValidationErrs)
 	m.conversation = append(m.conversation, Message{Role: "user", Content: fixPrompt})
 
 	ctx, cancel := context.WithCancel(context.Background())
