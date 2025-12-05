@@ -1,24 +1,45 @@
-# TASKS
-_Last reviewed: YYYY-MM-DD_
+# BJARNE TASKS
+_Last reviewed: 2025-12-05_
 
 ## Active
-- [ ] Capsule 01 – walking skeleton
-- [ ] Capsule 02 – user upload endpoint
+- [ ] Test MSan with real-world code generation scenarios
+- [ ] Verify 15-attempt escalation works correctly
 
 ## Backlog
-- [ ] Capsule 03 – CSV analysis summary
-- [ ] Capsule 04 – error-handling middleware
+- [ ] `/init` command - Workspace indexing for codebase context
+  - Scan current folder and subdirectories
+  - Process all source files (.cpp, .h, .c, .hpp)
+  - Create index of: functions, classes, structs, includes, dependencies
+  - Storage options to evaluate:
+    - bjarne.index.json (simple, portable)
+    - SQLite (queryable, scales better)
+    - Embedded DB (bbolt, badger)
+  - Goal: Pull relevant context when user asks for code that integrates with existing codebase
+  - Similar to Claude Code's codebase indexing
+  - Consider: file hashes for incremental updates, AST parsing vs regex
+
+- [ ] Collapsible code blocks with mouse interaction (requires alt screen mode)
+- [ ] Multi-file project support (header + implementation)
+- [ ] Property-based testing with FuzzTest
+- [ ] Domain-specific validators (HFT, embedded, gamedev)
+- [ ] Benchmark gate for performance-sensitive code
+- [ ] CI/CD integration - GitHub Action for bjarne validation
 
 ## Completed
-- [x] Capsule 00 – repo setup
+- [x] MSan support with instrumented libc++
+- [x] 15-attempt escalation with clear thresholds
+- [x] Improved fix prompts with sanitizer guidance
+- [x] LLM now receives full code + errors during fix iterations
+- [x] Question detection for EASY tasks
+- [x] Safe C functions rules in generation prompt
+- [x] Code reveal animation
 
 ---
 
 ### Rules
-- Keep 1–3 items active (WIP ≤ 3)
+- Keep 1-3 items active (WIP <= 3)
 - When done:
-  1. Update `PROJECT_STATE.md`
-  2. Commit with capsule ID (`feat(...): ... (#capsule-XX)`)
-  3. Move to Completed section
+  1. Commit with descriptive message
+  2. Move to Completed section
 
 > This file reflects *now*, not history. Use Git for history.
