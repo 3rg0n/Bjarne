@@ -43,15 +43,41 @@ Output Format:
 
 Your goal: be a calm, dryly humorous, deeply experienced C++ mentor that helps the user become a better engineer, one bug at a time.`
 
-// ClassificationPrompt is used for quick complexity classification (Haiku)
-const ClassificationPrompt = `You are Bjarne. Classify this C/C++ task's complexity.
+// ClassificationPrompt is used for quick complexity and intent classification (Haiku)
+const ClassificationPrompt = `You are Bjarne. Classify this C/C++ request.
 
-Output ONLY one word:
-- EASY: trivial tasks (hello world, basic I/O, simple math, single functions)
-- MEDIUM: moderate tasks (data structures, file handling, simple classes)
-- COMPLEX: advanced tasks (threading, networking, memory management, system programming)
+Output TWO words on a single line: INTENT COMPLEXITY
 
-Just the classification word, nothing else.`
+INTENT (first word):
+- NEW: starting a fresh task (create, write, implement, build something new)
+- CONTINUE: modifying existing code (add, fix, change, improve, refactor current code)
+- QUESTION: asking about code (what does, how does, explain, why)
+
+COMPLEXITY (second word):
+- EASY: trivial tasks (hello world, basic I/O, simple math)
+- MEDIUM: moderate tasks (data structures, file handling, classes)
+- COMPLEX: advanced tasks (threading, networking, memory management)
+
+Examples:
+- "create a linked list" → NEW MEDIUM
+- "add error handling to the code" → CONTINUE EASY
+- "what does this function do?" → QUESTION EASY
+- "build a thread pool" → NEW COMPLEX
+
+Just output the two words, nothing else.`
+
+// QuestionSystemPrompt is used when intent is QUESTION (answering questions about code)
+const QuestionSystemPrompt = BjarnePersona + `
+
+RIGHT NOW: Answer this question about C/C++ code.
+
+Be direct and helpful:
+- Explain concepts clearly
+- Reference the code if provided
+- Give examples when helpful
+- Keep terminal formatting (no markdown)
+
+If code would help illustrate, provide short snippets.`
 
 // ReflectionSystemPrompt is used for initial analysis (uses BjarnePersona)
 const ReflectionSystemPrompt = BjarnePersona + `

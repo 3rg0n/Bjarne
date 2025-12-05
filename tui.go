@@ -90,7 +90,8 @@ type Model struct {
 	originalPrompt string            // Store original prompt to parse examples
 	examples       *ExampleTests     // Parsed example tests from prompt
 	dod            *DefinitionOfDone // Definition of Done for complex tasks
-	difficulty     string            // EASY, MEDIUM, COMPLEX from reflection
+	difficulty     string            // EASY, MEDIUM, COMPLEX from classification
+	intent         string            // NEW, CONTINUE, QUESTION from classification
 
 	// Escalation tracking
 	currentIteration   int      // Current fix attempt within current model
@@ -304,21 +305,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ctx.Err() == context.Canceled {
 				return m, nil
 			}
-			// Classification failed - default to MEDIUM and continue
-			m.addOutput(m.styles.Warning.Render("Classification failed, defaulting to MEDIUM"))
+			// Classification failed - default to NEW MEDIUM and continue
+			m.addOutput(m.styles.Warning.Render("Classification failed, defaulting to NEW MEDIUM"))
+			m.intent = "NEW"
 			m.difficulty = "MEDIUM"
 			return m.startThinking(m.getModelForComplexity("MEDIUM"))
 		}
 
-		// Parse the classification result (EASY/MEDIUM/COMPLEX)
+		// Parse the classification result (INTENT COMPLEXITY)
 		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
 		classification := strings.TrimSpace(strings.ToUpper(msg.result.Text))
+		parts := strings.Fields(classification)
 
-		// Normalize the classification
+		// Parse intent (first word)
+		m.intent = "NEW" // default
+		if len(parts) >= 1 {
+			switch {
+			case strings.Contains(parts[0], "CONTINUE"):
+				m.intent = "CONTINUE"
+			case strings.Contains(parts[0], "QUESTION"):
+				m.intent = "QUESTION"
+			default:
+				m.intent = "NEW"
+			}
+		}
+
+		// Parse complexity (second word, or first if only one word for backwards compat)
+		m.difficulty = "MEDIUM" // default
+		complexityWord := classification
+		if len(parts) >= 2 {
+			complexityWord = parts[1]
+		}
 		switch {
-		case strings.Contains(classification, "EASY"):
+		case strings.Contains(complexityWord, "EASY"):
 			m.difficulty = "EASY"
-		case strings.Contains(classification, "COMPLEX"):
+		case strings.Contains(complexityWord, "COMPLEX"):
 			m.difficulty = "COMPLEX"
 		default:
 			m.difficulty = "MEDIUM"
@@ -326,7 +347,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Show classification result
 		m.addOutput("")
-		var diffDisplay string
+		var intentDisplay, diffDisplay string
+		switch m.intent {
+		case "NEW":
+			intentDisplay = m.styles.Info.Render("[NEW]")
+		case "CONTINUE":
+			intentDisplay = m.styles.Accent.Render("[CONTINUE]")
+		case "QUESTION":
+			intentDisplay = m.styles.Dim.Render("[QUESTION]")
+		}
 		switch m.difficulty {
 		case "EASY":
 			diffDisplay = m.styles.Success.Render("[EASY]")
@@ -335,7 +364,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "COMPLEX":
 			diffDisplay = m.styles.Error.Render("[COMPLEX]")
 		}
-		m.addOutput(fmt.Sprintf("Complexity: %s", diffDisplay))
+		m.addOutput(fmt.Sprintf("Intent: %s  Complexity: %s", intentDisplay, diffDisplay))
 
 		// Select model based on complexity and start analysis
 		model := m.getModelForComplexity(m.difficulty)
@@ -371,6 +400,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addOutput(line)
 		}
 		m.addOutput("")
+
+		// Handle based on intent
+		if m.intent == "QUESTION" {
+			// For questions, the analysis IS the response - no code generation
+			m.addOutput("")
+			m.addOutput(m.styles.Dim.Render("(Question answered - no code to generate)"))
+			m.state = StateInput
+			m.textarea.Focus()
+			return m, textarea.Blink
+		}
 
 		if m.difficulty == "EASY" && !containsQuestion(reflection) {
 			// Skip confirmation for easy tasks - generate immediately
@@ -697,7 +736,11 @@ func (m *Model) getModelForComplexity(difficulty string) string {
 
 func (m *Model) startThinking(model string) (Model, tea.Cmd) {
 	m.state = StateThinking
-	m.statusMsg = "Analyzing…"
+	if m.intent == "QUESTION" {
+		m.statusMsg = "Answering…"
+	} else {
+		m.statusMsg = "Analyzing…"
+	}
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
@@ -707,14 +750,19 @@ func (m *Model) startThinking(model string) (Model, tea.Cmd) {
 
 	return *m, tea.Batch(
 		m.spinner.Tick,
-		m.doThinking(ctx, model),
+		m.doThinking(ctx, model, m.intent),
 		tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
 	)
 }
 
-func (m *Model) doThinking(ctx context.Context, model string) tea.Cmd {
+func (m *Model) doThinking(ctx context.Context, model string, intent string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.provider.Generate(ctx, model, ReflectionSystemPrompt, m.conversation, m.config.MaxTokens)
+		// Use appropriate prompt based on intent
+		systemPrompt := ReflectionSystemPrompt
+		if intent == "QUESTION" {
+			systemPrompt = QuestionSystemPrompt
+		}
+		result, err := m.provider.Generate(ctx, model, systemPrompt, m.conversation, m.config.MaxTokens)
 		return thinkingDoneMsg{result: result, err: err}
 	}
 }
