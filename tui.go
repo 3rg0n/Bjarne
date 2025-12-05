@@ -727,7 +727,7 @@ func (m *Model) startGenerating() (Model, tea.Cmd) {
 	// Use model based on complexity (EASY=Haiku, MEDIUM=Sonnet, COMPLEX=Opus)
 	model := m.getModelForComplexity(m.difficulty)
 
-	m.statusMsg = fmt.Sprintf("Generating code with %s…", shortModelName(model))
+	m.statusMsg = "Generating code…"
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
@@ -735,8 +735,7 @@ func (m *Model) startGenerating() (Model, tea.Cmd) {
 	m.resetEscalation()
 
 	m.addOutput("")
-	m.addOutput(m.styles.Info.Render("Starting code generation..."))
-	m.addOutput(fmt.Sprintf("   Model: %s", m.styles.Accent.Render(shortModelName(model))))
+	m.addOutput(m.styles.Info.Render("Generating code..."))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx = ctx
@@ -913,12 +912,12 @@ func (m *Model) startFix() (Model, tea.Cmd) {
 	}
 
 	m.state = StateFixing
-	m.statusMsg = fmt.Sprintf("Fixing with %s (attempt %d)…", modelName, attemptNum)
+	m.statusMsg = fmt.Sprintf("Fixing code (attempt %d)…", attemptNum)
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
 	m.addOutput("")
-	m.addOutput(m.styles.Warning.Render(fmt.Sprintf("Attempting fix with %s (attempt %d)...", modelName, attemptNum)))
+	m.addOutput(m.styles.Warning.Render(fmt.Sprintf("Fixing code (attempt %d)...", attemptNum)))
 
 	// Show the errors being sent to the LLM
 	m.addOutput(m.styles.Dim.Render("Errors to fix:"))
