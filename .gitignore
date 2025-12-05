@@ -44,3 +44,16 @@ tmp/
 # Container build cache
 .docker/
 .podman/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Personal/internal notes (not for public)
+amp.agent.md
+concept*.md
+kanban.md
+tasks/
+
+# Internal state docs
+docs/state.md
+docs/project_state.md
