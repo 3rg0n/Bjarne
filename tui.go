@@ -90,8 +90,9 @@ type Model struct {
 	difficulty     string            // EASY, MEDIUM, COMPLEX from reflection
 
 	// Escalation tracking
-	currentIteration   int      // Current fix attempt (1-based)
+	currentIteration   int      // Current fix attempt within current model
 	currentModelIndex  int      // Index into escalation chain (-1 = generate model)
+	totalFixAttempts   int      // Total fix attempts across all models (for display)
 	lastValidationErrs string   // Last validation errors for fix prompt
 	modelsUsed         []string // Track which models we've tried
 
@@ -789,101 +790,48 @@ func (m *Model) doValidation(ctx context.Context) tea.Cmd {
 func (m *Model) resetEscalation() {
 	m.currentIteration = 0
 	m.currentModelIndex = -1
+	m.totalFixAttempts = 0
 	m.lastValidationErrs = ""
 	m.modelsUsed = nil
 }
 
 // canEscalate checks if we can attempt another fix
 func (m *Model) canEscalate() bool {
-	// Try 3 times with each model before escalating
-	maxPerModel := 3
+	// Maximum total fix attempts across all models
+	const maxTotalAttempts = 15
 
-	// Build escalation chain based on complexity
-	var escalationChain []string
-	switch m.difficulty {
-	case "EASY":
-		escalationChain = []string{
-			"global.anthropic.claude-sonnet-4-5-20250929-v1:0",
-			m.config.OracleModel,
-		}
-	case "MEDIUM":
-		escalationChain = []string{
-			m.config.OracleModel,
-		}
-	case "COMPLEX":
-		// Already at Opus - allow more retries since nowhere to escalate
-		escalationChain = []string{}
-	default:
-		escalationChain = m.config.EscalationModels
-	}
-
-	// Total attempts allowed
-	totalAttempts := maxPerModel * (1 + len(escalationChain))
-
-	// For COMPLEX (no escalation chain), allow extra retries
-	if m.difficulty == "COMPLEX" && len(escalationChain) == 0 {
-		totalAttempts = 4 // Allow 4 fix attempts with Opus
-	}
-
-	// Calculate total attempts made so far
-	attemptsMade := m.currentIteration
-	if m.currentModelIndex >= 0 {
-		attemptsMade += (m.currentModelIndex + 1) * maxPerModel
-	}
-
-	return attemptsMade < totalAttempts
+	return m.totalFixAttempts < maxTotalAttempts
 }
 
 // getCurrentModel returns the current model to use for fixes
-// Uses the complexity-based model as the starting point, then escalates
+// Escalates to more powerful models after several attempts
 func (m *Model) getCurrentModel() string {
-	// Get the base model based on complexity (same as generation)
+	// Escalation thresholds: try base model first, then escalate
+	// Attempts 1-5: base model (based on complexity)
+	// Attempts 6-10: Sonnet (if not already)
+	// Attempts 11-15: Opus
+
 	baseModel := m.getModelForComplexity(m.difficulty)
+	sonnet := "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+	opus := m.config.OracleModel
 
-	if m.currentModelIndex == -1 {
-		// First fix attempts use same model as generation
+	if m.totalFixAttempts <= 5 {
 		return baseModel
-	}
-
-	// Build escalation chain starting from the base model
-	// For COMPLEX (Opus), no escalation possible - already at top
-	// For MEDIUM (Sonnet), escalate to Opus
-	// For EASY (Haiku), escalate to Sonnet then Opus
-	var escalationChain []string
-	switch m.difficulty {
-	case "EASY":
-		escalationChain = []string{
-			"global.anthropic.claude-sonnet-4-5-20250929-v1:0",
-			m.config.OracleModel, // Opus
+	} else if m.totalFixAttempts <= 10 {
+		// Escalate to at least Sonnet
+		if m.difficulty == "EASY" {
+			return sonnet
 		}
-	case "MEDIUM":
-		escalationChain = []string{
-			m.config.OracleModel, // Opus
-		}
-	case "COMPLEX":
-		// Already at Opus, no escalation
-		escalationChain = []string{}
-	default:
-		escalationChain = m.config.EscalationModels
+		return baseModel // MEDIUM/COMPLEX already at Sonnet or Opus
+	} else {
+		// Final escalation to Opus
+		return opus
 	}
-
-	if m.currentModelIndex < len(escalationChain) {
-		return escalationChain[m.currentModelIndex]
-	}
-	return baseModel
 }
 
-// advanceEscalation moves to the next iteration/model
+// advanceEscalation increments the fix attempt counter
 func (m *Model) advanceEscalation() {
-	maxPerModel := 3
-
-	m.currentIteration++
-
-	// Check if we need to escalate to a more powerful model
-	if m.currentIteration >= maxPerModel {
-		m.currentIteration = 0
-		m.currentModelIndex++
-	}
+	m.totalFixAttempts++
 }
 
 func (m *Model) startFix() (Model, tea.Cmd) {
@@ -891,14 +839,8 @@ func (m *Model) startFix() (Model, tea.Cmd) {
 
 	currentModel := m.getCurrentModel()
 
-	// Display attempt number (currentIteration is already 1-based after advanceEscalation)
-	attemptNum := m.currentIteration
-	if attemptNum == 0 {
-		attemptNum = 1 // After escalation, iteration resets to 0 but this is attempt 1 with new model
-	}
-
 	m.state = StateFixing
-	m.statusMsg = fmt.Sprintf("Fixing code (attempt %d)…", attemptNum)
+	m.statusMsg = fmt.Sprintf("Fixing code (attempt %d/15)…", m.totalFixAttempts)
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
