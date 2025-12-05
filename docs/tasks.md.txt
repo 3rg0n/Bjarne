@@ -18,20 +18,6 @@ _Last reviewed: 2025-12-05_
   - Similar to Claude Code's codebase indexing
   - Consider: file hashes for incremental updates, AST parsing vs regex
 
-- [ ] Easy installation / distribution
-  - Goal: `something install -g bjarne` that just works
-  - Options to evaluate:
-    - `go install github.com/3rg0n/bjarne@latest` (Go users only)
-    - Homebrew tap (macOS/Linux): `brew install 3rg0n/tap/bjarne`
-    - Scoop bucket (Windows): `scoop install bjarne`
-    - npm wrapper package (cross-platform): `npm install -g bjarne`
-    - goreleaser for GitHub Releases with pre-built binaries
-  - Post-install script should:
-    - Check for podman/docker, warn if missing
-    - Offer to pull bjarne-validator container
-    - Create default config if needed
-  - Publish container to ghcr.io/3rg0n/bjarne-validator:latest
-
 - [ ] Collapsible code blocks with mouse interaction (requires alt screen mode)
 - [ ] Multi-file project support (header + implementation)
 - [ ] Property-based testing with FuzzTest
@@ -40,6 +26,12 @@ _Last reviewed: 2025-12-05_
 - [ ] CI/CD integration - GitHub Action for bjarne validation
 
 ## Completed
+- [x] Easy installation / distribution
+  - goreleaser for GitHub Releases (linux/darwin/windows, amd64/arm64)
+  - Homebrew tap: `brew install 3rg0n/tap/bjarne`
+  - Scoop bucket: `scoop bucket add bjarne https://github.com/3rg0n/scoop-bucket && scoop install bjarne`
+  - Container: `ghcr.io/3rg0n/bjarne-validator:latest`
+  - First-run auto-pull with user confirmation
 - [x] Multi-provider LLM support (Bedrock, Anthropic, OpenAI, Gemini)
   - Abstract LLMProvider interface in provider.go
   - BJARNE_PROVIDER env var: bedrock|anthropic|openai|gemini
