@@ -578,9 +578,9 @@ func (m Model) View() string {
 		b.WriteString(m.styles.Dim.Render("(" + status + ")"))
 
 	case StateRevealing:
-		progress := fmt.Sprintf("%d/%d lines", m.revealCurrentLine, len(m.revealLines))
-		b.WriteString(m.styles.Success.Render("▌ ") + "Revealing code... ")
-		b.WriteString(m.styles.Dim.Render("(" + progress + ")"))
+		// Don't show progress - the scrolling code is visual feedback
+		// Showing progress here causes display overlap with addOutput()
+		b.WriteString("")
 	}
 
 	return b.String()
