@@ -20,7 +20,7 @@ func handleFirstRunPull(ctx context.Context, container *ContainerRuntime) error 
 	fmt.Println("for memory errors, undefined behavior, and data races.")
 	fmt.Println()
 	fmt.Printf("Container image: \033[96m%s\033[0m\n", container.imageName)
-	fmt.Printf("Size: ~500MB (Wolfi-based, minimal attack surface)\n")
+	fmt.Printf("Size: ~500MB (Ubuntu-based with Clang 21 + sanitizers)\n")
 	fmt.Println()
 	fmt.Print("Pull the validation container now? [Y/n] ")
 
@@ -69,30 +69,179 @@ func parseDifficulty(text string) (string, string) {
 	return "MEDIUM", text
 }
 
+// CodeFile represents a single source file in a multi-file project
+type CodeFile struct {
+	Filename string
+	Content  string
+}
+
 // extractCode extracts code from a markdown code block
+// For single file responses, returns the code content
+// For multi-file responses, returns all files concatenated (use extractMultipleFiles instead)
 func extractCode(response string) string {
+	files := extractMultipleFiles(response)
+	if len(files) == 0 {
+		return ""
+	}
+	if len(files) == 1 {
+		return files[0].Content
+	}
+	// For backwards compatibility, return all content if multiple files
+	var sb strings.Builder
+	for i, f := range files {
+		if i > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString("// FILE: " + f.Filename + "\n")
+		sb.WriteString(f.Content)
+	}
+	return sb.String()
+}
+
+// extractMultipleFiles extracts multiple code files from an LLM response
+// Returns a slice of CodeFile, each with filename and content
+// If no // FILE: markers are found, returns single file with default name
+func extractMultipleFiles(response string) []CodeFile {
 	// Normalize line endings (Windows \r\n to \n)
 	response = strings.ReplaceAll(response, "\r\n", "\n")
 
-	// Match ```cpp ... ``` or ```c ... ``` or ```c++ ... ``` or ``` ... ```
-	// Language specifier must be followed by whitespace or newline
-	// More permissive: handle optional trailing newline before closing ```
+	var files []CodeFile
+
+	// Match all code blocks: ```cpp ... ``` or ```c ... ``` or ```c++ ... ```
 	re := regexp.MustCompile("(?s)```(?:cpp|c\\+\\+|c)?[ \t]*\n(.*?)\n?```")
-	matches := re.FindStringSubmatch(response)
-	if len(matches) >= 2 {
-		return strings.TrimSpace(matches[1])
+	matches := re.FindAllStringSubmatch(response, -1)
+
+	if len(matches) == 0 {
+		// Fallback: try truncated response (no closing ```)
+		reOpen := regexp.MustCompile("(?s)```(?:cpp|c\\+\\+|c)[ \t]*\n(.+)")
+		matches = reOpen.FindAllStringSubmatch(response, -1)
+		if len(matches) == 0 {
+			return nil
+		}
 	}
 
-	// Fallback: if response was truncated (no closing ```), try to extract anyway
-	// Only if we find an opening fence with code language
-	reOpen := regexp.MustCompile("(?s)```(?:cpp|c\\+\\+|c)[ \t]*\n(.+)")
-	matches = reOpen.FindStringSubmatch(response)
-	if len(matches) >= 2 {
-		// Return everything after the opening fence
-		return strings.TrimSpace(matches[1])
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		content := strings.TrimSpace(match[1])
+		if content == "" {
+			continue
+		}
+
+		// Check for // FILE: marker at the start
+		filename := detectFilename(content)
+		if filename != "" {
+			// Remove the FILE: line from content
+			lines := strings.SplitN(content, "\n", 2)
+			if len(lines) > 1 {
+				content = strings.TrimSpace(lines[1])
+			} else {
+				content = ""
+			}
+		}
+
+		if content != "" {
+			files = append(files, CodeFile{
+				Filename: filename,
+				Content:  content,
+			})
+		}
+	}
+
+	// If no filenames detected, assign defaults
+	if len(files) == 1 && files[0].Filename == "" {
+		files[0].Filename = "code.cpp"
+	} else if len(files) > 1 {
+		hasMain := false
+		for i := range files {
+			if files[i].Filename == "" {
+				// Try to detect from content
+				files[i].Filename = inferFilename(files[i].Content, i)
+			}
+			if files[i].Filename == "main.cpp" || strings.Contains(files[i].Content, "int main(") {
+				hasMain = true
+			}
+		}
+		// If no main.cpp, assign it to the first file with main()
+		if !hasMain {
+			for i := range files {
+				if strings.Contains(files[i].Content, "int main(") {
+					files[i].Filename = "main.cpp"
+					break
+				}
+			}
+		}
+	}
+
+	return files
+}
+
+// detectFilename looks for // FILE: marker at the start of content
+func detectFilename(content string) string {
+	lines := strings.SplitN(content, "\n", 2)
+	if len(lines) == 0 {
+		return ""
+	}
+	firstLine := strings.TrimSpace(lines[0])
+
+	// Match // FILE: filename.ext or /* FILE: filename.ext */
+	patterns := []string{
+		`^//\s*FILE:\s*(\S+)`,
+		`^/\*\s*FILE:\s*(\S+)\s*\*/`,
+	}
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(firstLine)
+		if len(matches) >= 2 {
+			return matches[1]
+		}
 	}
 
 	return ""
+}
+
+// inferFilename tries to guess a filename from content
+func inferFilename(content string, index int) string {
+	// Check for #pragma once or header guards -> it's a header
+	if strings.Contains(content, "#pragma once") || regexp.MustCompile(`#ifndef\s+\w+_H`).MatchString(content) {
+		// Try to find class/struct name
+		classRe := regexp.MustCompile(`(?:class|struct)\s+(\w+)`)
+		if match := classRe.FindStringSubmatch(content); len(match) >= 2 {
+			return strings.ToLower(match[1]) + ".h"
+		}
+		return fmt.Sprintf("header%d.h", index)
+	}
+
+	// Check for main function
+	if strings.Contains(content, "int main(") {
+		return "main.cpp"
+	}
+
+	// Check if it looks like implementation (includes local header)
+	if regexp.MustCompile(`#include\s*"[^"]+\.h"`).MatchString(content) {
+		// Find the first local include
+		includeRe := regexp.MustCompile(`#include\s*"([^"]+)\.h"`)
+		if match := includeRe.FindStringSubmatch(content); len(match) >= 2 {
+			return match[1] + ".cpp"
+		}
+	}
+
+	return fmt.Sprintf("file%d.cpp", index)
+}
+
+// IsMultiFileProject checks if the extracted files represent a multi-file project
+func IsMultiFileProject(files []CodeFile) bool {
+	if len(files) <= 1 {
+		return false
+	}
+	// Check if any file is a header
+	for _, f := range files {
+		if strings.HasSuffix(f.Filename, ".h") || strings.HasSuffix(f.Filename, ".hpp") {
+			return true
+		}
+	}
+	return len(files) > 1
 }
 
 // saveToFile writes code to a file

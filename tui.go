@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -81,7 +82,8 @@ type Model struct {
 	statusMsg      string
 	startTime      time.Time
 	tokenCount     int
-	currentCode    string
+	currentCode    string     // For backwards compatibility and single-file projects
+	currentFiles   []CodeFile // Multi-file project support
 	validated      bool
 	analyzed       bool              // True after first analysis, subsequent inputs go to generation
 	originalPrompt string            // Store original prompt to parse examples
@@ -112,6 +114,7 @@ type Model struct {
 	tokenTracker   *TokenTracker
 	conversation   []Message
 	workspaceIndex *WorkspaceIndex // Indexed codebase for context
+	vectorIndex    *VectorIndex    // Semantic search index with embeddings
 
 	// For async operations
 	ctx      context.Context
@@ -415,8 +418,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
 		m.conversation = append(m.conversation, Message{Role: "assistant", Content: msg.result.Text})
 
-		code := extractCode(msg.result.Text)
-		if code == "" {
+		// Extract files (supports both single and multi-file responses)
+		files := extractMultipleFiles(msg.result.Text)
+		if len(files) == 0 {
 			// No code extracted - show non-code response parts only
 			m.addOutput("")
 			cleaned := stripMarkdown(msg.result.Text)
@@ -430,8 +434,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Code extracted - go straight to validation (don't show code yet)
-		m.currentCode = code
+		// Store files
+		m.currentFiles = files
+		// For backwards compatibility, also store combined code
+		m.currentCode = extractCode(msg.result.Text)
+
+		// Show file count if multi-file
+		if len(files) > 1 {
+			m.addOutput("")
+			m.addOutput(m.styles.Info.Render(fmt.Sprintf("Generated %d files:", len(files))))
+			for _, f := range files {
+				m.addOutput(fmt.Sprintf("  - %s", f.Filename))
+			}
+		}
+
 		return m.startValidation()
 
 	case validationDoneMsg:
@@ -465,7 +481,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Start animated code reveal
 			totalTime := m.showValidationSuccess(msg.results)
 			m.revealTotalTime = totalTime
-			m.revealLines = strings.Split(m.currentCode, "\n")
+
+			// Build reveal lines with file separators for multi-file projects
+			m.revealLines = m.buildRevealLines()
 			m.revealCurrentLine = 0
 			m.state = StateRevealing
 
@@ -763,7 +781,46 @@ func (m *Model) doGenerating(ctx context.Context, model string) tea.Cmd {
 func (m *Model) buildSystemPrompt() string {
 	prompt := GenerationSystemPrompt
 
-	// Add workspace context if available
+	// Try semantic search with vector index first (better context)
+	if m.vectorIndex != nil && len(m.conversation) > 0 {
+		// Use the last user message as the query
+		var query string
+		for i := len(m.conversation) - 1; i >= 0; i-- {
+			if m.conversation[i].Role == "user" {
+				query = m.conversation[i].Content
+				break
+			}
+		}
+
+		if query != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			chunks, err := m.vectorIndex.SearchSimilar(ctx, query, 5) // Top 5 relevant chunks
+			if err == nil && len(chunks) > 0 {
+				var contextBuilder strings.Builder
+				contextBuilder.WriteString("<relevant_code_context>\n")
+				contextBuilder.WriteString("The following code from the project may be relevant:\n\n")
+
+				for _, chunk := range chunks {
+					contextBuilder.WriteString(fmt.Sprintf("// %s (%s)\n", chunk.Name, chunk.Type))
+					// Truncate content if too long
+					content := chunk.Content
+					if len(content) > 500 {
+						content = content[:500] + "\n// ... (truncated)"
+					}
+					contextBuilder.WriteString(content)
+					contextBuilder.WriteString("\n\n")
+				}
+				contextBuilder.WriteString("</relevant_code_context>\n")
+
+				prompt += "\n\n" + contextBuilder.String() + "\nIntegrate with the existing codebase where appropriate."
+				return prompt
+			}
+		}
+	}
+
+	// Fall back to workspace index (structural context)
 	if m.workspaceIndex != nil && len(m.workspaceIndex.Files) > 0 {
 		context := m.workspaceIndex.GetContextForPrompt(2000) // ~2000 tokens max
 		if context != "" {
@@ -795,8 +852,16 @@ func (m *Model) startValidation() (Model, tea.Cmd) {
 
 func (m *Model) doValidation(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
-		// Use full validation with examples and DoD
-		results, err := m.container.ValidateCodeWithExamples(ctx, m.currentCode, "code.cpp", m.examples, m.dod)
+		var results []ValidationResult
+		var err error
+
+		// Use multi-file validation if we have multiple files
+		if len(m.currentFiles) > 1 {
+			results, err = m.container.ValidateMultiFileCodeWithExamples(ctx, m.currentFiles, m.examples, m.dod)
+		} else {
+			// Single file validation (backwards compatible)
+			results, err = m.container.ValidateCodeWithExamples(ctx, m.currentCode, "code.cpp", m.examples, m.dod)
+		}
 		return validationDoneMsg{results: results, err: err}
 	}
 }
@@ -943,12 +1008,45 @@ func (m *Model) showValidationFailure(results []ValidationResult, isFinal bool) 
 	m.addOutput("")
 	m.addOutput(m.styles.Warning.Render("Generated code (failed validation):"))
 
-	// Show full code
-	m.addOutput("```cpp")
-	m.addOutput(m.currentCode)
-	m.addOutput("```")
+	// Show full code (multi-file aware)
+	if len(m.currentFiles) > 1 {
+		for _, f := range m.currentFiles {
+			m.addOutput("")
+			m.addOutput(m.styles.Info.Render(fmt.Sprintf("// === %s ===", f.Filename)))
+			m.addOutput("```cpp")
+			m.addOutput(f.Content)
+			m.addOutput("```")
+		}
+	} else {
+		m.addOutput("```cpp")
+		m.addOutput(m.currentCode)
+		m.addOutput("```")
+	}
 	m.addOutput("")
 	m.addOutput("You can refine your request or ask bjarne to fix specific issues.")
+}
+
+// buildRevealLines creates the lines to reveal, with file separators for multi-file projects
+func (m *Model) buildRevealLines() []string {
+	if len(m.currentFiles) <= 1 {
+		// Single file - just split by lines
+		return strings.Split(m.currentCode, "\n")
+	}
+
+	// Multi-file project - add file headers
+	var lines []string
+	for i, f := range m.currentFiles {
+		if i > 0 {
+			lines = append(lines, "```")
+			lines = append(lines, "")
+		}
+		lines = append(lines, m.styles.Info.Render(fmt.Sprintf("// === %s ===", f.Filename)))
+		if i > 0 {
+			lines = append(lines, "```cpp")
+		}
+		lines = append(lines, strings.Split(f.Content, "\n")...)
+	}
+	return lines
 }
 
 func (m Model) handleCommand(input string) (Model, tea.Cmd) {
@@ -964,7 +1062,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.addOutput("Available Commands:")
 		m.addOutput("  /help, /h              Show this help")
 		m.addOutput("  /init                  Index current directory for context-aware generation")
-		m.addOutput("  /save <file>, /s       Save last generated code to file")
+		m.addOutput("  /save [file|dir], /s   Save code (multi-file: /save dir/ or /save)")
 		m.addOutput("  /clear, /c             Clear conversation")
 		m.addOutput("  /code, /show           Show last generated code")
 		m.addOutput("  /tokens, /t            Show token usage")
@@ -988,7 +1086,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 			m.addOutput("Re-indexing...")
 		}
 
-		// Index the workspace
+		// Index the workspace (structural)
 		fileCount := 0
 		index, err := IndexWorkspace(cwd, func(path string) {
 			fileCount++
@@ -1002,7 +1100,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 			break
 		}
 
-		// Save the index
+		// Save the structural index
 		if err := SaveIndex(index, cwd); err != nil {
 			m.addOutput(m.styles.Error.Render("Failed to save index: " + err.Error()))
 			break
@@ -1018,11 +1116,57 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.addOutput(fmt.Sprintf("  Lines:     %d", index.Summary.TotalLines))
 		m.addOutput("")
 		m.addOutput(m.styles.Dim.Render("Saved to " + IndexFileName))
+
+		// Build vector index for semantic search
+		m.addOutput("")
+		m.addOutput(m.styles.Warning.Render("Building semantic index..."))
+
+		cfg := DefaultVectorIndexConfig()
+		vecIndex, err := NewVectorIndex(cfg)
+		if err != nil {
+			m.addOutput(m.styles.Error.Render("Vector index failed: " + err.Error()))
+			m.addOutput(m.styles.Info.Render("Structural index will still be used for context."))
+			break
+		}
+
+		// Download model if needed
+		ctx := context.Background()
+		if err := vecIndex.EnsureModel(ctx, func(msg string) {
+			m.addOutput(m.styles.Dim.Render("  " + msg))
+		}); err != nil {
+			m.addOutput(m.styles.Warning.Render("Model download failed: " + err.Error()))
+			m.addOutput(m.styles.Info.Render("Using pseudo-embeddings for testing."))
+		}
+
+		// Index with embeddings
+		if err := vecIndex.IndexWorkspaceWithEmbeddings(ctx, cwd, func(msg string) {
+			m.addOutput(m.styles.Dim.Render("  " + msg))
+		}); err != nil {
+			m.addOutput(m.styles.Warning.Render("Embedding failed: " + err.Error()))
+			_ = vecIndex.Close()
+		} else {
+			// Get stats
+			files, chunks, embeddings, _ := vecIndex.GetStats(ctx)
+			m.vectorIndex = vecIndex
+			m.addOutput("")
+			m.addOutput(m.styles.Success.Render("✓ Semantic index built!"))
+			m.addOutput(fmt.Sprintf("  Files:      %d", files))
+			m.addOutput(fmt.Sprintf("  Chunks:     %d", chunks))
+			m.addOutput(fmt.Sprintf("  Embeddings: %d", embeddings))
+			if IsONNXAvailable() {
+				m.addOutput(m.styles.Dim.Render("  Using ONNX embeddings"))
+			} else {
+				m.addOutput(m.styles.Dim.Render("  Using pseudo-embeddings (install ONNX for better results)"))
+			}
+		}
+
+		m.addOutput("")
 		m.addOutput(m.styles.Info.Render("Context will be included in code generation prompts."))
 
 	case "/clear", "/c":
 		m.conversation = []Message{}
 		m.currentCode = ""
+		m.currentFiles = nil
 		m.validated = false
 		m.analyzed = false
 		m.originalPrompt = ""
@@ -1032,11 +1176,26 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.resetEscalation()
 		m.tokenTracker.Reset()
 		m.workspaceIndex = nil // Also clear the index on /clear
+		if m.vectorIndex != nil {
+			_ = m.vectorIndex.Close()
+			m.vectorIndex = nil
+		}
 		m.addOutput("Conversation cleared.")
 
 	case "/code", "/show":
-		if m.currentCode == "" {
+		if m.currentCode == "" && len(m.currentFiles) == 0 {
 			m.addOutput("No code generated yet.")
+		} else if len(m.currentFiles) > 1 {
+			// Multi-file project
+			m.addOutput("")
+			m.addOutput(m.styles.Warning.Render(fmt.Sprintf("Last generated code (%d files):", len(m.currentFiles))))
+			for _, f := range m.currentFiles {
+				m.addOutput("")
+				m.addOutput(m.styles.Info.Render(fmt.Sprintf("// === %s ===", f.Filename)))
+				m.addOutput("```cpp")
+				m.addOutput(f.Content)
+				m.addOutput("```")
+			}
 		} else {
 			m.addOutput("")
 			m.addOutput(m.styles.Warning.Render("Last generated code:"))
@@ -1046,20 +1205,65 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		}
 
 	case "/save", "/s":
-		if len(parts) < 2 {
-			m.addOutput(m.styles.Error.Render("Usage: /save <filename>"))
-		} else if m.currentCode == "" {
+		if m.currentCode == "" && len(m.currentFiles) == 0 {
 			m.addOutput(m.styles.Error.Render("No code to save."))
-		} else {
-			filename := parts[1]
-			if err := saveToFile(filename, m.currentCode); err != nil {
-				m.addOutput(m.styles.Error.Render("Error saving: " + err.Error()))
+		} else if len(m.currentFiles) > 1 {
+			// Multi-file project - save all files
+			if len(parts) >= 2 {
+				// User specified a directory or single filename
+				targetDir := parts[1]
+				// Check if it looks like a directory
+				if strings.HasSuffix(targetDir, "/") || strings.HasSuffix(targetDir, "\\") || !strings.Contains(targetDir, ".") {
+					// Save all files to this directory
+					if err := os.MkdirAll(targetDir, 0750); err != nil {
+						m.addOutput(m.styles.Error.Render("Error creating directory: " + err.Error()))
+						break
+					}
+					m.addOutput("")
+					for _, f := range m.currentFiles {
+						filePath := filepath.Join(targetDir, f.Filename)
+						if err := saveToFile(filePath, f.Content); err != nil {
+							m.addOutput(m.styles.Error.Render(fmt.Sprintf("Error saving %s: %s", f.Filename, err.Error())))
+						} else {
+							m.addOutput(m.styles.Success.Render(fmt.Sprintf("✓ Saved %s", filePath)))
+						}
+					}
+				} else {
+					// Single filename - save combined (backwards compatible)
+					if err := saveToFile(targetDir, m.currentCode); err != nil {
+						m.addOutput(m.styles.Error.Render("Error saving: " + err.Error()))
+					} else {
+						m.addOutput("")
+						m.addOutput(m.styles.Success.Render("✓ Saved to " + targetDir))
+						m.addOutput(m.styles.Dim.Render("  (all files combined into single file)"))
+					}
+				}
 			} else {
+				// No target specified - save to current directory with original filenames
 				m.addOutput("")
-				m.addOutput(m.styles.Success.Render("✓ Saved to " + filename))
-				// Show file size for confirmation
-				if info, err := os.Stat(filename); err == nil {
-					m.addOutput(m.styles.Dim.Render(fmt.Sprintf("  %d bytes written", info.Size())))
+				for _, f := range m.currentFiles {
+					if err := saveToFile(f.Filename, f.Content); err != nil {
+						m.addOutput(m.styles.Error.Render(fmt.Sprintf("Error saving %s: %s", f.Filename, err.Error())))
+					} else {
+						m.addOutput(m.styles.Success.Render(fmt.Sprintf("✓ Saved %s", f.Filename)))
+					}
+				}
+			}
+		} else {
+			// Single file
+			if len(parts) < 2 {
+				m.addOutput(m.styles.Error.Render("Usage: /save <filename>"))
+			} else {
+				filename := parts[1]
+				if err := saveToFile(filename, m.currentCode); err != nil {
+					m.addOutput(m.styles.Error.Render("Error saving: " + err.Error()))
+				} else {
+					m.addOutput("")
+					m.addOutput(m.styles.Success.Render("✓ Saved to " + filename))
+					// Show file size for confirmation
+					if info, err := os.Stat(filename); err == nil {
+						m.addOutput(m.styles.Dim.Render(fmt.Sprintf("  %d bytes written", info.Size())))
+					}
 				}
 			}
 		}

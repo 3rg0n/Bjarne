@@ -88,6 +88,138 @@ func (c *ContainerRuntime) ValidateCode(ctx context.Context, code string, filena
 	return c.ValidateCodeWithProgress(ctx, code, filename, nil)
 }
 
+// ValidateMultiFileCode validates a multi-file project
+func (c *ContainerRuntime) ValidateMultiFileCode(ctx context.Context, files []CodeFile) ([]ValidationResult, error) {
+	return c.ValidateMultiFileCodeWithExamples(ctx, files, nil, nil)
+}
+
+// ValidateMultiFileCodeWithExamples validates a multi-file project with example tests
+// Note: examples and dod parameters are reserved for future use (will be implemented similar to single-file validation)
+func (c *ContainerRuntime) ValidateMultiFileCodeWithExamples(ctx context.Context, files []CodeFile, examples *ExampleTests, dod *DefinitionOfDone) ([]ValidationResult, error) { //nolint:unparam // examples and dod will be used in future
+	// TODO: Implement example tests and DoD for multi-file projects
+	_ = examples // Reserved for future use
+	_ = dod      // Reserved for future use
+
+	// Create temp directory for all files
+	tmpDir, err := os.MkdirTemp("", "bjarne-validate-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Write all files to temp directory
+	var sourceFiles []string
+	for _, f := range files {
+		filePath := filepath.Join(tmpDir, f.Filename)
+		if err := os.WriteFile(filePath, []byte(f.Content), 0600); err != nil {
+			return nil, fmt.Errorf("failed to write %s: %w", f.Filename, err)
+		}
+		// Track .cpp files for compilation
+		if strings.HasSuffix(f.Filename, ".cpp") || strings.HasSuffix(f.Filename, ".cc") || strings.HasSuffix(f.Filename, ".c") {
+			sourceFiles = append(sourceFiles, "/src/"+f.Filename)
+		}
+	}
+
+	if len(sourceFiles) == 0 {
+		return nil, fmt.Errorf("no source files (.cpp/.cc/.c) found")
+	}
+
+	// Build compilation command for all source files
+	srcArgs := strings.Join(sourceFiles, " ")
+
+	var results []ValidationResult
+
+	// Stage 1: clang-tidy on all source files
+	for _, f := range files {
+		if strings.HasSuffix(f.Filename, ".cpp") || strings.HasSuffix(f.Filename, ".cc") || strings.HasSuffix(f.Filename, ".c") {
+			result := c.runValidationStage(ctx, tmpDir, "clang-tidy:"+f.Filename,
+				"clang-tidy", "-quiet", "-header-filter=.*", "/src/"+f.Filename, "--", "-std=c++17", "-Wall", "-Wextra", "-I/src")
+			results = append(results, result)
+			if !result.Success {
+				return results, nil
+			}
+		}
+	}
+
+	// Stage 2: cppcheck on all files
+	result := c.runValidationStage(ctx, tmpDir, "cppcheck",
+		"sh", "-c",
+		"which cppcheck > /dev/null 2>&1 && cppcheck --enable=all --error-exitcode=1 --suppress=missingIncludeSystem --std=c++17 -I/src /src/*.cpp /src/*.h 2>&1 || (which cppcheck > /dev/null 2>&1 || echo 'cppcheck not installed, skipping')")
+	if !result.Success && !strings.Contains(result.Output, "not installed") {
+		results = append(results, result)
+		return results, nil
+	}
+	if !strings.Contains(result.Output, "not installed") {
+		results = append(results, result)
+	}
+
+	// Stage 3: Compile all source files together
+	result = c.runValidationStage(ctx, tmpDir, "compile",
+		"sh", "-c",
+		"clang++ -std=c++17 -Wall -Wextra -Werror -fstack-protector-all -D_FORTIFY_SOURCE=2 -I/src -o /tmp/test "+srcArgs)
+	results = append(results, result)
+	if !result.Success {
+		return results, nil
+	}
+
+	// Stage 4: ASAN
+	result = c.runValidationStage(ctx, tmpDir, "asan",
+		"sh", "-c",
+		"clang++ -std=c++17 -fsanitize=address -fno-omit-frame-pointer -g -I/src -o /tmp/test "+srcArgs+" && /tmp/test")
+	results = append(results, result)
+	if !result.Success {
+		return results, nil
+	}
+
+	// Stage 5: UBSAN
+	result = c.runValidationStage(ctx, tmpDir, "ubsan",
+		"sh", "-c",
+		"clang++ -std=c++17 -fsanitize=undefined -fno-omit-frame-pointer -g -I/src -o /tmp/test "+srcArgs+" && /tmp/test")
+	results = append(results, result)
+	if !result.Success {
+		return results, nil
+	}
+
+	// Stage 6: MSan
+	result = c.runValidationStage(ctx, tmpDir, "msan",
+		"sh", "-c",
+		"clang++ -std=c++17 -fsanitize=memory -fsanitize-memory-track-origins "+
+			"-fno-omit-frame-pointer -g -stdlib=libc++ "+
+			"-nostdinc++ -isystem /opt/msan/include/c++/v1 "+
+			"-L/opt/msan/lib -Wl,-rpath,/opt/msan/lib "+
+			"-I/src -o /tmp/test "+srcArgs+" && /tmp/test")
+	results = append(results, result)
+	if !result.Success {
+		return results, nil
+	}
+
+	// Stage 7: TSAN if threads detected
+	usesThreads := false
+	for _, f := range files {
+		if codeUsesThreads(f.Content) {
+			usesThreads = true
+			break
+		}
+	}
+	if usesThreads {
+		result = c.runValidationStage(ctx, tmpDir, "tsan",
+			"sh", "-c",
+			"clang++ -std=c++17 -fsanitize=thread -fno-omit-frame-pointer -g -I/src -o /tmp/test "+srcArgs+" && /tmp/test")
+		results = append(results, result)
+		if !result.Success {
+			return results, nil
+		}
+	}
+
+	// Stage 8: Final run
+	result = c.runValidationStage(ctx, tmpDir, "run",
+		"sh", "-c",
+		"clang++ -std=c++17 -O2 -I/src -o /tmp/test "+srcArgs+" && /tmp/test")
+	results = append(results, result)
+
+	return results, nil
+}
+
 // ValidateCodeWithExamples runs validation including example-based tests
 func (c *ContainerRuntime) ValidateCodeWithExamples(ctx context.Context, code string, filename string, examples *ExampleTests, dod *DefinitionOfDone) ([]ValidationResult, error) {
 	return c.validateCodeFull(ctx, code, filename, examples, dod, nil)

@@ -115,10 +115,39 @@ BANNED C FUNCTIONS (use safe alternatives):
 - Prefer std::array over C arrays
 - Use std::string_view for non-owning string references
 
-OUTPUT:
+OUTPUT FORMAT:
+For simple tasks (single file):
 - Wrap code in a single cpp code block
 - Include main() unless asked for library/header
-- Brief comments for key decisions only
+
+For multi-file projects (when a header is needed):
+- Use filename comments to separate files
+- Format: // FILE: filename.h or // FILE: filename.cpp
+- Each file in its own code block
+
+Example multi-file output:
+` + "```cpp" + `
+// FILE: counter.h
+#pragma once
+class Counter { ... };
+` + "```" + `
+
+` + "```cpp" + `
+// FILE: counter.cpp
+#include "counter.h"
+Counter::Counter() { ... }
+` + "```" + `
+
+` + "```cpp" + `
+// FILE: main.cpp
+#include "counter.h"
+int main() { ... }
+` + "```" + `
+
+Generate multi-file output when:
+- Asked for a class/library (separate header + implementation)
+- Code is complex enough to benefit from separation
+- User explicitly requests header files
 
 VALIDATION GATES:
 - clang-tidy: Static analysis
