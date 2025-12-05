@@ -18,6 +18,29 @@ _Last reviewed: 2025-12-05_
   - Similar to Claude Code's codebase indexing
   - Consider: file hashes for incremental updates, AST parsing vs regex
 
+- [ ] Multi-provider LLM support (beyond Bedrock)
+  - Anthropic API direct (claude.ai)
+  - OpenAI API (GPT-4, GPT-4o)
+  - Google Gemini API
+  - Config: BJARNE_PROVIDER=bedrock|anthropic|openai|gemini
+  - Config: BJARNE_API_KEY for non-Bedrock providers
+  - Abstract LLM interface: Generate(ctx, model, system, messages, maxTokens)
+  - Model mapping per provider (e.g., "haiku" -> provider-specific model ID)
+
+- [ ] Easy installation / distribution
+  - Goal: `something install -g bjarne` that just works
+  - Options to evaluate:
+    - `go install github.com/3rg0n/bjarne@latest` (Go users only)
+    - Homebrew tap (macOS/Linux): `brew install 3rg0n/tap/bjarne`
+    - Scoop bucket (Windows): `scoop install bjarne`
+    - npm wrapper package (cross-platform): `npm install -g bjarne`
+    - goreleaser for GitHub Releases with pre-built binaries
+  - Post-install script should:
+    - Check for podman/docker, warn if missing
+    - Offer to pull bjarne-validator container
+    - Create default config if needed
+  - Publish container to ghcr.io/3rg0n/bjarne-validator:latest
+
 - [ ] Collapsible code blocks with mouse interaction (requires alt screen mode)
 - [ ] Multi-file project support (header + implementation)
 - [ ] Property-based testing with FuzzTest
