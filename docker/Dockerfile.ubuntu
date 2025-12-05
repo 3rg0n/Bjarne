@@ -49,7 +49,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone LLVM and build MSan-instrumented libc++
-RUN git clone --depth 1 --branch llvmorg-21.0.0 https://github.com/llvm/llvm-project.git /tmp/llvm \
+# Using main branch since clang-21 is from development; libc++ ABI is stable
+RUN git clone --depth 1 --branch main https://github.com/llvm/llvm-project.git /tmp/llvm \
     && cmake -G Ninja -S /tmp/llvm/runtimes -B /tmp/llvm/build \
         -DCMAKE_C_COMPILER=clang-21 \
         -DCMAKE_CXX_COMPILER=clang++-21 \
