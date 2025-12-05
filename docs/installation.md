@@ -127,11 +127,11 @@ If you want to build the validation container locally:
 ```bash
 cd docker
 
-# Build Wolfi-based image (recommended)
-podman build -t bjarne-validator:local .
+# Build Ubuntu-based image (recommended)
+podman build -f Dockerfile.ubuntu -t bjarne-validator:local .
 
-# Or build Ubuntu-based image
-podman build -f Dockerfile.ubuntu -t bjarne-validator:ubuntu .
+# Or build Wolfi-based image (smaller, requires glibc compat)
+podman build -t bjarne-validator:local .
 ```
 
 Then set the environment variable:

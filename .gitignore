@@ -11,6 +11,12 @@ bin/
 # Pre-built releases tracked via Git LFS
 !releases/
 
+# ONNX runtime libraries (downloaded separately)
+lib/
+
+# Windows artifacts
+nul
+
 # Test artifacts
 *.test
 coverage.out
