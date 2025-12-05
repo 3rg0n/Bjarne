@@ -96,19 +96,19 @@ var AnthropicModelMap = map[string]string{
 }
 
 // OpenAIModelMap maps canonical names to OpenAI model IDs
-// GPT-5.1 for general, GPT-5.1-Codex-Max for complex/agentic tasks
+// Using currently available models; update when GPT-5.1 releases
 var OpenAIModelMap = map[string]string{
-	ModelHaiku:  "gpt-5.1",           // Fast, general reasoning
-	ModelSonnet: "gpt-5.1",           // Same model, medium tasks
-	ModelOpus:   "gpt-5.1-codex-max", // Agentic coding, long-horizon
+	ModelHaiku:  "gpt-4o-mini", // Fast, cost-effective
+	ModelSonnet: "gpt-4o",      // Balanced performance
+	ModelOpus:   "o1",          // Most capable reasoning
 }
 
 // GeminiModelMap maps canonical names to Gemini model IDs
-// Using gemini-3-pro-preview for all tiers (1M context in, 64k out)
+// Using currently available models
 var GeminiModelMap = map[string]string{
-	ModelHaiku:  "gemini-3-pro-preview", // With thinking: low
-	ModelSonnet: "gemini-3-pro-preview", // With thinking: high
-	ModelOpus:   "gemini-3-pro-preview", // With thinking: high
+	ModelHaiku:  "gemini-2.0-flash-lite", // Fast, cost-effective
+	ModelSonnet: "gemini-2.0-flash",      // Balanced performance
+	ModelOpus:   "gemini-2.0-pro",        // Most capable
 }
 
 // MapModelGeneric maps a canonical model name using the appropriate provider map
