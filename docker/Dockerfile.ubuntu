@@ -90,3 +90,4 @@ ENV MSAN_OPTIONS=symbolize=1:print_stacktrace=1:halt_on_error=1
 WORKDIR /workspace
 
 CMD ["clang++", "--version"]
+
