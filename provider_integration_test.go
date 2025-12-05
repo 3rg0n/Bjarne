@@ -48,6 +48,47 @@ func TestOpenAIProvider(t *testing.T) {
 	}
 }
 
+// TestAnthropicProvider tests the Anthropic provider with a real API call
+// Requires ANTHROPIC_KEY environment variable
+func TestAnthropicProvider(t *testing.T) {
+	apiKey := os.Getenv("ANTHROPIC_KEY")
+	if apiKey == "" {
+		t.Skip("ANTHROPIC_KEY not set, skipping integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cfg := &ProviderConfig{
+		Provider: ProviderAnthropic,
+		APIKey:   apiKey,
+		Models:   ModelSettings{Generate: "claude-3-5-haiku-latest"},
+	}
+
+	provider, err := NewProvider(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Failed to create Anthropic provider: %v", err)
+	}
+
+	t.Logf("Provider: %s", provider.Name())
+
+	messages := []Message{
+		{Role: "user", Content: "Say 'Hello from bjarne!' - respond with exactly those 3 words."},
+	}
+
+	result, err := provider.Generate(ctx, "claude-3-5-haiku-latest", "You are a helpful assistant. Follow instructions exactly.", messages, 50)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	t.Logf("Response: %s", result.Text)
+	t.Logf("Tokens: %d in, %d out", result.InputTokens, result.OutputTokens)
+
+	if result.Text == "" {
+		t.Error("Expected non-empty response")
+	}
+}
+
 // TestGeminiProvider tests the Gemini provider with a real API call
 // Requires GEMINI_KEY environment variable
 func TestGeminiProvider(t *testing.T) {
