@@ -15,13 +15,13 @@ func TestOpenAIProvider(t *testing.T) {
 		t.Skip("OPENAI_KEY not set, skipping integration test")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	cfg := &ProviderConfig{
 		Provider: ProviderOpenAI,
 		APIKey:   apiKey,
-		Models:   ModelSettings{Generate: "gpt-4o-mini"},
+		Models:   ModelSettings{Generate: "gpt-5.1"},
 	}
 
 	provider, err := NewProvider(ctx, cfg)
@@ -35,7 +35,7 @@ func TestOpenAIProvider(t *testing.T) {
 		{Role: "user", Content: "Say 'Hello from bjarne!' - respond with exactly those 3 words."},
 	}
 
-	result, err := provider.Generate(ctx, "gpt-4o-mini", "You are a helpful assistant. Follow instructions exactly.", messages, 50)
+	result, err := provider.Generate(ctx, "gpt-5.1", "You are a helpful assistant. Follow instructions exactly.", messages, 500)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}

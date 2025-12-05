@@ -96,11 +96,10 @@ var AnthropicModelMap = map[string]string{
 }
 
 // OpenAIModelMap maps canonical names to OpenAI model IDs
-// Using currently available models; update when GPT-5.1 releases
 var OpenAIModelMap = map[string]string{
-	ModelHaiku:  "gpt-4o-mini", // Fast, cost-effective
-	ModelSonnet: "gpt-4o",      // Balanced performance
-	ModelOpus:   "o1",          // Most capable reasoning
+	ModelHaiku:  "gpt-5-mini-2025-08-07", // Fast, cost-effective
+	ModelSonnet: "gpt-5.1-2025-11-13",    // Balanced performance
+	ModelOpus:   "gpt-5.1-codex-max",     // Most capable, agentic coding
 }
 
 // GeminiModelMap maps canonical names to Gemini model IDs

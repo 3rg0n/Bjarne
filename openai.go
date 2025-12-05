@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 const openaiAPIURL = "https://api.openai.com/v1/chat/completions"
@@ -23,12 +24,13 @@ type OpenAIClient struct {
 
 // OpenAIRequest represents a request to the OpenAI Chat Completions API
 type OpenAIRequest struct {
-	Model           string          `json:"model"`
-	Messages        []OpenAIMessage `json:"messages"`
-	MaxTokens       int             `json:"max_tokens,omitempty"`
-	Temperature     float64         `json:"temperature,omitempty"`
-	Stream          bool            `json:"stream,omitempty"`
-	ReasoningEffort string          `json:"reasoning_effort,omitempty"` // For GPT-5.1: "medium", "high", "xhigh"
+	Model               string          `json:"model"`
+	Messages            []OpenAIMessage `json:"messages"`
+	MaxTokens           int             `json:"max_tokens,omitempty"`            // For older models
+	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"` // For GPT-5.1+, o1, o3
+	Temperature         float64         `json:"temperature,omitempty"`
+	Stream              bool            `json:"stream,omitempty"`
+	ReasoningEffort     string          `json:"reasoning_effort,omitempty"` // For GPT-5.1: "medium", "high", "xhigh"
 }
 
 // OpenAIMessage represents a message in the OpenAI format
@@ -113,11 +115,17 @@ func convertMessagesToOpenAI(systemPrompt string, messages []Message) []OpenAIMe
 
 // getReasoningEffort returns the reasoning effort level based on model
 func getReasoningEffort(model string) string {
-	// GPT-5.1-Codex-Max supports reasoning effort levels
-	if model == "gpt-5.1-codex-max" {
+	// GPT-5.1 and o-series models support reasoning effort levels
+	if strings.HasPrefix(model, "gpt-5") || strings.HasPrefix(model, "o1") || strings.HasPrefix(model, "o3") {
 		return "high" // Default to high for complex code generation
 	}
 	return "" // Standard models don't use reasoning effort
+}
+
+// usesMaxCompletionTokens returns true if the model uses max_completion_tokens instead of max_tokens
+func usesMaxCompletionTokens(model string) bool {
+	// GPT-5+, o1, o3 models use max_completion_tokens
+	return strings.HasPrefix(model, "gpt-5") || strings.HasPrefix(model, "o1") || strings.HasPrefix(model, "o3")
 }
 
 // Generate sends a request to the OpenAI API
@@ -130,8 +138,14 @@ func (c *OpenAIClient) Generate(ctx context.Context, model, systemPrompt string,
 	req := OpenAIRequest{
 		Model:           model,
 		Messages:        convertMessagesToOpenAI(systemPrompt, messages),
-		MaxTokens:       maxTokens,
 		ReasoningEffort: getReasoningEffort(model),
+	}
+
+	// Use appropriate token limit parameter based on model
+	if usesMaxCompletionTokens(model) {
+		req.MaxCompletionTokens = maxTokens
+	} else {
+		req.MaxTokens = maxTokens
 	}
 
 	body, err := json.Marshal(req)
@@ -193,9 +207,15 @@ func (c *OpenAIClient) GenerateStreaming(ctx context.Context, model, systemPromp
 	req := OpenAIRequest{
 		Model:           model,
 		Messages:        convertMessagesToOpenAI(systemPrompt, messages),
-		MaxTokens:       maxTokens,
 		Stream:          true,
 		ReasoningEffort: getReasoningEffort(model),
+	}
+
+	// Use appropriate token limit parameter based on model
+	if usesMaxCompletionTokens(model) {
+		req.MaxCompletionTokens = maxTokens
+	} else {
+		req.MaxTokens = maxTokens
 	}
 
 	body, err := json.Marshal(req)
