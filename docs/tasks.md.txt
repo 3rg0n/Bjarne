@@ -18,29 +18,6 @@ _Last reviewed: 2025-12-05_
   - Similar to Claude Code's codebase indexing
   - Consider: file hashes for incremental updates, AST parsing vs regex
 
-- [ ] Multi-provider LLM support (beyond Bedrock)
-  - Anthropic API direct (claude.ai)
-    - Claude Haiku, Sonnet, Opus (same models, direct API)
-  - OpenAI API
-    - GPT-5.1 (general reasoning)
-    - GPT-5.1-Codex-Max (agentic coding, long-horizon tasks, context compaction)
-    - Reasoning effort levels: medium, high, xhigh
-  - Google Gemini API
-    - Model: gemini-3-pro-preview (1M context in / 64k out)
-    - Thinking levels: low (fast), high (default, deep reasoning) - NO medium
-    - Temperature: keep at 1.0 (required for reasoning)
-    - Thought signatures: must return for multi-turn reasoning
-    - Pricing: $2/$12 per 1M tokens (<200k), $4/$18 (>200k)
-  - Config: BJARNE_PROVIDER=bedrock|anthropic|openai|gemini
-  - Config: BJARNE_API_KEY for non-Bedrock providers
-  - Abstract LLM interface: Generate(ctx, model, system, messages, maxTokens)
-  - Model mapping per provider:
-    - "haiku" -> claude-3-5-haiku / gpt-5.1 / gemini-3-pro
-    - "sonnet" -> claude-3-5-sonnet / gpt-5.1 / gemini-3-pro
-    - "opus" -> claude-opus-4 / gpt-5.1-codex-max / gemini-3-pro
-  - Note: GPT-5.1-Codex-Max supports multi-hour autonomous sessions with context
-    compaction over millions of tokens - ideal for complex refactors
-
 - [ ] Easy installation / distribution
   - Goal: `something install -g bjarne` that just works
   - Options to evaluate:
@@ -63,6 +40,11 @@ _Last reviewed: 2025-12-05_
 - [ ] CI/CD integration - GitHub Action for bjarne validation
 
 ## Completed
+- [x] Multi-provider LLM support (Bedrock, Anthropic, OpenAI, Gemini)
+  - Abstract LLMProvider interface in provider.go
+  - BJARNE_PROVIDER env var: bedrock|anthropic|openai|gemini
+  - BJARNE_API_KEY for non-Bedrock providers
+  - Model mapping: haiku/sonnet/opus -> provider-specific IDs
 - [x] MSan support with instrumented libc++
 - [x] 15-attempt escalation with clear thresholds
 - [x] Improved fix prompts with sanitizer guidance

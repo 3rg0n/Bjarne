@@ -216,10 +216,7 @@ func FormatDiagnosticsForLLM(diagnostics []Diagnostic) string {
 		// File and line
 		if d.File != "" {
 			// Strip /src/ prefix for cleaner output
-			file := d.File
-			if strings.HasPrefix(file, "/src/") {
-				file = file[5:]
-			}
+			file := strings.TrimPrefix(d.File, "/src/")
 			sb.WriteString(file)
 			if d.Line > 0 {
 				sb.WriteString(":")

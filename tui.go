@@ -23,7 +23,7 @@ const (
 	StateAcknowledging       // Processing user's response to clarifying questions
 	StateGenerating
 	StateValidating
-	StateFixing   // Attempting to fix failed code
+	StateFixing    // Attempting to fix failed code
 	StateRevealing // Animated code reveal
 )
 
@@ -106,7 +106,7 @@ type Model struct {
 	revealTotalTime   float64  // Total validation time to show after reveal
 
 	// Session data
-	bedrock      *BedrockClient
+	provider     LLMProvider // Abstract LLM provider (Bedrock, Anthropic, OpenAI, Gemini)
 	container    *ContainerRuntime
 	config       *Config
 	tokenTracker *TokenTracker
@@ -164,7 +164,7 @@ type codeRevealMsg struct {
 type codeRevealDoneMsg struct{}
 
 // NewModel creates a new bubbletea model
-func NewModel(bedrock *BedrockClient, container *ContainerRuntime, cfg *Config) Model {
+func NewModel(provider LLMProvider, container *ContainerRuntime, cfg *Config) Model {
 	// Create textarea for input
 	ta := textarea.New()
 	ta.Placeholder = "What would you have me create?"
@@ -192,7 +192,7 @@ func NewModel(bedrock *BedrockClient, container *ContainerRuntime, cfg *Config) 
 		spinner:      s,
 		styles:       NewStyles(),
 		state:        StateInput,
-		bedrock:      bedrock,
+		provider:     provider,
 		container:    container,
 		config:       cfg,
 		tokenTracker: NewTokenTracker(cfg.MaxTotalTokens, cfg.WarnTokenThreshold),
@@ -656,7 +656,7 @@ func (m *Model) startClassifying(prompt string) (Model, tea.Cmd) {
 func (m *Model) doClassification(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
 		// Quick classification with Haiku
-		result, err := m.bedrock.GenerateWithModel(ctx, m.config.ReflectionModel, ClassificationPrompt, m.conversation, 50)
+		result, err := m.provider.Generate(ctx, m.config.ReflectionModel, ClassificationPrompt, m.conversation, 50)
 		return classificationDoneMsg{result: result, err: err}
 	}
 }
@@ -694,7 +694,7 @@ func (m *Model) startThinking(model string) (Model, tea.Cmd) {
 
 func (m *Model) doThinking(ctx context.Context, model string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.bedrock.GenerateWithModel(ctx, model, ReflectionSystemPrompt, m.conversation, m.config.MaxTokens)
+		result, err := m.provider.Generate(ctx, model, ReflectionSystemPrompt, m.conversation, m.config.MaxTokens)
 		return thinkingDoneMsg{result: result, err: err}
 	}
 }
@@ -718,7 +718,7 @@ func (m *Model) startAcknowledging() (Model, tea.Cmd) {
 
 func (m *Model) doAcknowledging(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.bedrock.GenerateWithModel(ctx, m.config.ChatModel, AcknowledgeSystemPrompt, m.conversation, m.config.MaxTokens)
+		result, err := m.provider.Generate(ctx, m.config.ChatModel, AcknowledgeSystemPrompt, m.conversation, m.config.MaxTokens)
 		return acknowledgeDoneMsg{result: result, err: err}
 	}
 }
@@ -752,7 +752,7 @@ func (m *Model) startGenerating() (Model, tea.Cmd) {
 
 func (m *Model) doGenerating(ctx context.Context, model string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.bedrock.GenerateWithModel(ctx, model, GenerationSystemPrompt, m.conversation, m.config.MaxTokens)
+		result, err := m.provider.Generate(ctx, model, GenerationSystemPrompt, m.conversation, m.config.MaxTokens)
 		return generatingDoneMsg{result: result, err: err}
 	}
 }
@@ -861,7 +861,7 @@ func (m *Model) startFix() (Model, tea.Cmd) {
 
 func (m *Model) doFix(ctx context.Context, model string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.bedrock.GenerateWithModel(ctx, model, GenerationSystemPrompt, m.conversation, m.config.MaxTokens)
+		result, err := m.provider.Generate(ctx, model, GenerationSystemPrompt, m.conversation, m.config.MaxTokens)
 		return fixDoneMsg{result: result, err: err}
 	}
 }
@@ -1043,13 +1043,15 @@ func StartTUI() error {
 	}
 	fmt.Println()
 
-	// Initialize Bedrock client
-	fmt.Println("Connecting to AWS Bedrock...")
-	bedrock, err := NewBedrockClient(ctx, cfg.GenerateModel)
+	// Initialize LLM provider
+	providerCfg := cfg.GetProviderConfig()
+	fmt.Printf("Connecting to %s...\n", providerDisplayName(cfg.Provider))
+	provider, err := NewProvider(ctx, providerCfg)
 	if err != nil {
 		fmt.Print(FormatUserError(err))
 		return err
 	}
+	fmt.Printf("Provider: %s\n", provider.Name())
 	fmt.Printf("Reflection: %s\n", shortModelName(cfg.ReflectionModel))
 	fmt.Printf("Generation: %s\n", shortModelName(cfg.GenerateModel))
 	fmt.Printf("Oracle: %s\n", shortModelName(cfg.OracleModel))
@@ -1061,10 +1063,26 @@ func StartTUI() error {
 	fmt.Println("Press Esc to interrupt during processing")
 	fmt.Println()
 
-	m := NewModel(bedrock, container, cfg)
+	m := NewModel(provider, container, cfg)
 	// Don't use WithAltScreen() - keeps normal terminal scrollback history
 	p := tea.NewProgram(m)
 
 	_, err = p.Run()
 	return err
+}
+
+// providerDisplayName returns a human-readable name for the provider
+func providerDisplayName(p ProviderType) string {
+	switch p {
+	case ProviderBedrock:
+		return "AWS Bedrock"
+	case ProviderAnthropic:
+		return "Anthropic API"
+	case ProviderOpenAI:
+		return "OpenAI API"
+	case ProviderGemini:
+		return "Google Gemini API"
+	default:
+		return string(p)
+	}
 }

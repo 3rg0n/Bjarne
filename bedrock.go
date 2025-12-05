@@ -12,6 +12,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 )
 
+// Ensure BedrockClient implements LLMProvider
+var _ LLMProvider = (*BedrockClient)(nil)
+
 // BedrockClient wraps the AWS Bedrock Runtime client
 type BedrockClient struct {
 	client       *bedrockruntime.Client
@@ -86,8 +89,9 @@ func NewBedrockClient(ctx context.Context, defaultModel string) (*BedrockClient,
 	}, nil
 }
 
-// Generate sends a prompt to Claude and returns the generated code (uses default model)
-func (b *BedrockClient) Generate(ctx context.Context, systemPrompt string, messages []Message) (string, error) {
+// GenerateSimple sends a prompt to Claude and returns the generated code (uses default model)
+// This is a convenience method that wraps GenerateWithModel
+func (b *BedrockClient) GenerateSimple(ctx context.Context, systemPrompt string, messages []Message) (string, error) {
 	result, err := b.GenerateWithModel(ctx, b.defaultModel, systemPrompt, messages, 4096)
 	if err != nil {
 		return "", err
@@ -181,7 +185,7 @@ func (b *BedrockClient) GenerateStreaming(ctx context.Context, modelID, systemPr
 	var outputTokens int
 
 	stream := output.GetStream()
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	for event := range stream.Events() {
 		switch v := event.(type) {
@@ -222,6 +226,54 @@ func (b *BedrockClient) GenerateStreaming(ctx context.Context, modelID, systemPr
 // GetDefaultModel returns the configured default model ID
 func (b *BedrockClient) GetDefaultModel() string {
 	return b.defaultModel
+}
+
+// Name returns the provider name (implements LLMProvider)
+func (b *BedrockClient) Name() string {
+	return "AWS Bedrock"
+}
+
+// MapModel maps a canonical model name to Bedrock model ID (implements LLMProvider)
+func (b *BedrockClient) MapModel(canonical string) string {
+	return MapModelGeneric(ProviderBedrock, canonical)
+}
+
+// DefaultModel returns the default model (implements LLMProvider)
+func (b *BedrockClient) DefaultModel() string {
+	return b.defaultModel
+}
+
+// Generate implements LLMProvider interface
+func (b *BedrockClient) Generate(ctx context.Context, model, systemPrompt string, messages []Message, maxTokens int) (*GenerateResult, error) {
+	return b.GenerateWithModel(ctx, model, systemPrompt, messages, maxTokens)
+}
+
+// NewBedrockProvider creates a BedrockClient as an LLMProvider
+func NewBedrockProvider(ctx context.Context, cfg *ProviderConfig) (LLMProvider, error) {
+	region := cfg.Region
+	if region == "" {
+		region = getEnvOrDefault("AWS_REGION", "us-east-1")
+	}
+
+	awsCfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(region),
+	)
+	if err != nil {
+		return nil, ErrAWSConfig(err)
+	}
+
+	client := bedrockruntime.NewFromConfig(awsCfg)
+
+	// Use configured generate model or default to Sonnet
+	defaultModel := cfg.Models.Generate
+	if defaultModel == "" {
+		defaultModel = BedrockModelMap[ModelSonnet]
+	}
+
+	return &BedrockClient{
+		client:       client,
+		defaultModel: defaultModel,
+	}, nil
 }
 
 // getEnvOrDefault returns the environment variable value or a default

@@ -20,6 +20,11 @@ type Config struct {
 	WarnTokenThreshold int
 	ValidatorImage     string
 
+	// Provider configuration
+	Provider ProviderType // bedrock, anthropic, openai, gemini
+	APIKey   string       // API key for non-Bedrock providers
+	Region   string       // AWS region for Bedrock
+
 	// Model configuration
 	ChatModel         string   // Model for chat/non-code responses
 	ReflectionModel   string   // Model for initial prompt analysis
@@ -45,6 +50,9 @@ func configFromSettings(settings *Settings) *Config {
 		MaxTotalTokens:     settings.Tokens.MaxPerSession,
 		WarnTokenThreshold: settings.Tokens.MaxPerSession * 80 / 100,
 		ValidatorImage:     settings.Container.Image,
+		Provider:           ProviderBedrock, // Default to Bedrock
+		Region:             "",              // Will use AWS_REGION env var
+		APIKey:             "",              // Will be set from env var
 		ChatModel:          settings.Models.Chat,
 		ReflectionModel:    settings.Models.Reflection,
 		GenerateModel:      settings.Models.Generate,
@@ -59,6 +67,22 @@ func LoadConfig() *Config {
 	// Load settings from file (or defaults if not found)
 	settings, _ := LoadSettings()
 	cfg := configFromSettings(settings)
+
+	// Provider configuration
+	// BJARNE_PROVIDER: bedrock (default), anthropic, openai, gemini
+	if val := os.Getenv("BJARNE_PROVIDER"); val != "" {
+		cfg.Provider = ParseProviderType(val)
+	}
+
+	// BJARNE_API_KEY: Required for non-Bedrock providers
+	if val := os.Getenv("BJARNE_API_KEY"); val != "" {
+		cfg.APIKey = val
+	}
+
+	// AWS_REGION: For Bedrock provider
+	if val := os.Getenv("AWS_REGION"); val != "" {
+		cfg.Region = val
+	}
 
 	// Environment variable overrides
 	if val := os.Getenv("BJARNE_MAX_ITERATIONS"); val != "" {
@@ -104,6 +128,16 @@ func LoadConfig() *Config {
 	}
 
 	return cfg
+}
+
+// GetProviderConfig returns a ProviderConfig from the Config
+func (c *Config) GetProviderConfig() *ProviderConfig {
+	return &ProviderConfig{
+		Provider: c.Provider,
+		APIKey:   c.APIKey,
+		Region:   c.Region,
+		Models:   c.Settings.Models,
+	}
 }
 
 // TokenTracker tracks token usage across the session
