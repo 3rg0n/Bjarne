@@ -366,8 +366,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.addOutput("")
 
-		if m.difficulty == "EASY" {
+		if m.difficulty == "EASY" && !containsQuestion(reflection) {
 			// Skip confirmation for easy tasks - generate immediately
+			// But only if the analysis doesn't ask clarifying questions
 			m.conversation = append(m.conversation, Message{Role: "user", Content: GenerateNowPrompt})
 			return m.startGenerating()
 		}

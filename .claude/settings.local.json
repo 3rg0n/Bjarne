@@ -1,17 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(golangci-lint run:*)",
-      "Bash(gofmt:*)",
-      "Bash(go test:*)",
-      "Bash(git commit:*)",
-      "Bash(podman build:*)",
-      "Bash(podman images:*)",
-      "WebFetch(domain:www.azquotes.com)",
-      "Bash(podman run:*)",
-      "Bash(MSYS_NO_PATHCONV=1 podman run:*)",
-      "Bash(go get:*)",
-      "Bash(go run -exec '' .)"
+      "Bash(go build:*)",
+      "Bash(git add:*)",
+      "Bash(timeout 30 ./bjarne.exe:*)",
+      "Bash(echo:*)",
+      "Bash(go doc:*)",
+      "Bash(git reset:*)",
+      "Bash(timeout 60 ./bjarne.exe:*)",
+      "Bash(cat:*)",
+      "Bash(git restore:*)"
     ],
     "deny": [],
     "ask": []

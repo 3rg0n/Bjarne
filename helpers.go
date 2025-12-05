@@ -184,6 +184,54 @@ func wrapText(text string, width int) []string {
 	return result
 }
 
+// containsQuestion checks if text contains a question that needs user response
+// Used to determine if we should wait for user input even for EASY tasks
+func containsQuestion(text string) bool {
+	text = strings.ToLower(text)
+
+	// Check for question marks in non-rhetorical context
+	if strings.Contains(text, "?") {
+		// Common question patterns that indicate waiting for user
+		questionPatterns := []string{
+			"what's the context",
+			"what is the context",
+			"what are you",
+			"what do you",
+			"help me understand",
+			"can you clarify",
+			"could you clarify",
+			"can you explain",
+			"could you explain",
+			"what would you",
+			"correct me if",
+			"any corrections",
+			"sound good",
+			"does that work",
+			"is that correct",
+			"is that right",
+			"let me know",
+			"what's your",
+			"what is your",
+		}
+		for _, pattern := range questionPatterns {
+			if strings.Contains(text, pattern) {
+				return true
+			}
+		}
+
+		// Check if ends with a question (last sentence has ?)
+		lines := strings.Split(strings.TrimSpace(text), "\n")
+		if len(lines) > 0 {
+			lastLine := strings.TrimSpace(lines[len(lines)-1])
+			if strings.HasSuffix(lastLine, "?") {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // shortModelName extracts a readable model name from the full ID
 func shortModelName(modelID string) string {
 	// global.anthropic.claude-haiku-4-5-20251001-v1:0 -> claude-haiku-4-5
