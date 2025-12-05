@@ -106,11 +106,12 @@ type Model struct {
 	revealTotalTime   float64  // Total validation time to show after reveal
 
 	// Session data
-	provider     LLMProvider // Abstract LLM provider (Bedrock, Anthropic, OpenAI, Gemini)
-	container    *ContainerRuntime
-	config       *Config
-	tokenTracker *TokenTracker
-	conversation []Message
+	provider       LLMProvider // Abstract LLM provider (Bedrock, Anthropic, OpenAI, Gemini)
+	container      *ContainerRuntime
+	config         *Config
+	tokenTracker   *TokenTracker
+	conversation   []Message
+	workspaceIndex *WorkspaceIndex // Indexed codebase for context
 
 	// For async operations
 	ctx      context.Context
@@ -752,9 +753,25 @@ func (m *Model) startGenerating() (Model, tea.Cmd) {
 
 func (m *Model) doGenerating(ctx context.Context, model string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.provider.Generate(ctx, model, GenerationSystemPrompt, m.conversation, m.config.MaxTokens)
+		systemPrompt := m.buildSystemPrompt()
+		result, err := m.provider.Generate(ctx, model, systemPrompt, m.conversation, m.config.MaxTokens)
 		return generatingDoneMsg{result: result, err: err}
 	}
+}
+
+// buildSystemPrompt creates the system prompt, including workspace context if indexed
+func (m *Model) buildSystemPrompt() string {
+	prompt := GenerationSystemPrompt
+
+	// Add workspace context if available
+	if m.workspaceIndex != nil && len(m.workspaceIndex.Files) > 0 {
+		context := m.workspaceIndex.GetContextForPrompt(2000) // ~2000 tokens max
+		if context != "" {
+			prompt += "\n\n" + context + "\n\nIntegrate with the existing codebase where appropriate."
+		}
+	}
+
+	return prompt
 }
 
 func (m *Model) startValidation() (Model, tea.Cmd) {
@@ -861,7 +878,8 @@ func (m *Model) startFix() (Model, tea.Cmd) {
 
 func (m *Model) doFix(ctx context.Context, model string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.provider.Generate(ctx, model, GenerationSystemPrompt, m.conversation, m.config.MaxTokens)
+		systemPrompt := m.buildSystemPrompt()
+		result, err := m.provider.Generate(ctx, model, systemPrompt, m.conversation, m.config.MaxTokens)
 		return fixDoneMsg{result: result, err: err}
 	}
 }
@@ -945,12 +963,62 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.addOutput("")
 		m.addOutput("Available Commands:")
 		m.addOutput("  /help, /h              Show this help")
+		m.addOutput("  /init                  Index current directory for context-aware generation")
 		m.addOutput("  /save <file>, /s       Save last generated code to file")
 		m.addOutput("  /clear, /c             Clear conversation")
 		m.addOutput("  /code, /show           Show last generated code")
 		m.addOutput("  /tokens, /t            Show token usage")
 		m.addOutput("  /quit, /q              Exit bjarne")
 		m.addOutput("")
+
+	case "/init":
+		m.addOutput("")
+		m.addOutput(m.styles.Warning.Render("Indexing workspace..."))
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			m.addOutput(m.styles.Error.Render("Error: " + err.Error()))
+			break
+		}
+
+		// Try to load existing index first
+		existingIndex, err := LoadIndex(cwd)
+		if err == nil {
+			m.addOutput(m.styles.Dim.Render(fmt.Sprintf("Found existing index (%d files)", existingIndex.Summary.TotalFiles)))
+			m.addOutput("Re-indexing...")
+		}
+
+		// Index the workspace
+		fileCount := 0
+		index, err := IndexWorkspace(cwd, func(path string) {
+			fileCount++
+			if fileCount%10 == 0 {
+				m.addOutput(m.styles.Dim.Render(fmt.Sprintf("  Scanned %d files...", fileCount)))
+			}
+		})
+
+		if err != nil {
+			m.addOutput(m.styles.Error.Render("Indexing failed: " + err.Error()))
+			break
+		}
+
+		// Save the index
+		if err := SaveIndex(index, cwd); err != nil {
+			m.addOutput(m.styles.Error.Render("Failed to save index: " + err.Error()))
+			break
+		}
+
+		m.workspaceIndex = index
+		m.addOutput("")
+		m.addOutput(m.styles.Success.Render("✓ Workspace indexed!"))
+		m.addOutput(fmt.Sprintf("  Files:     %d", index.Summary.TotalFiles))
+		m.addOutput(fmt.Sprintf("  Functions: %d", index.Summary.TotalFunctions))
+		m.addOutput(fmt.Sprintf("  Classes:   %d", index.Summary.TotalClasses))
+		m.addOutput(fmt.Sprintf("  Structs:   %d", index.Summary.TotalStructs))
+		m.addOutput(fmt.Sprintf("  Lines:     %d", index.Summary.TotalLines))
+		m.addOutput("")
+		m.addOutput(m.styles.Dim.Render("Saved to " + IndexFileName))
+		m.addOutput(m.styles.Info.Render("Context will be included in code generation prompts."))
 
 	case "/clear", "/c":
 		m.conversation = []Message{}
@@ -963,6 +1031,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.difficulty = ""
 		m.resetEscalation()
 		m.tokenTracker.Reset()
+		m.workspaceIndex = nil // Also clear the index on /clear
 		m.addOutput("Conversation cleared.")
 
 	case "/code", "/show":
@@ -1063,7 +1132,18 @@ func StartTUI() error {
 	fmt.Println("Press Esc to interrupt during processing")
 	fmt.Println()
 
+	// Try to load existing workspace index
+	var workspaceIndex *WorkspaceIndex
+	cwd, _ := os.Getwd()
+	if idx, err := LoadIndex(cwd); err == nil {
+		workspaceIndex = idx
+		fmt.Printf("Workspace index: %d files, %d functions, %d classes\n",
+			idx.Summary.TotalFiles, idx.Summary.TotalFunctions, idx.Summary.TotalClasses)
+		fmt.Println()
+	}
+
 	m := NewModel(provider, container, cfg)
+	m.workspaceIndex = workspaceIndex
 	// Don't use WithAltScreen() - keeps normal terminal scrollback history
 	p := tea.NewProgram(m)
 
