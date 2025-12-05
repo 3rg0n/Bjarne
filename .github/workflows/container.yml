@@ -5,6 +5,7 @@ on:
     branches: [master, main]
     paths:
       - 'docker/**'
+      - '.github/workflows/container.yml'
   pull_request:
     branches: [master, main]
     paths:
@@ -52,26 +53,13 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
 
-      - name: Build and push (Wolfi)
-        uses: docker/build-push-action@v5
-        with:
-          context: ./docker
-          file: ./docker/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build Ubuntu fallback
-        if: github.event_name != 'pull_request'
+      - name: Build and push (Ubuntu)
         uses: docker/build-push-action@v5
         with:
           context: ./docker
           file: ./docker/Dockerfile.ubuntu
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ubuntu
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha

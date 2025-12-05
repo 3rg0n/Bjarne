@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -1312,7 +1313,26 @@ func StartTUI() error {
 			fmt.Println("         Code generation will work, but validation will be skipped.")
 		}
 	} else {
-		fmt.Printf("Validation container: %s [OK]\n", container.imageName)
+		// Image exists, check for updates
+		fmt.Printf("Validation container: %s\n", container.imageName)
+		fmt.Print("Checking for updates... ")
+		if container.CheckForUpdate(ctx) {
+			fmt.Println("\033[93mupdate available!\033[0m")
+			fmt.Print("Pull the latest container image? [Y/n] ")
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			response = strings.TrimSpace(strings.ToLower(response))
+			if response == "" || response == "y" || response == "yes" {
+				fmt.Println("Pulling latest image...")
+				if err := container.PullImage(ctx); err != nil {
+					fmt.Printf("\033[93mWarning:\033[0m Failed to update: %v\n", err)
+				} else {
+					fmt.Println("\033[92mContainer updated!\033[0m")
+				}
+			}
+		} else {
+			fmt.Println("\033[92mup to date\033[0m")
+		}
 	}
 	fmt.Println()
 

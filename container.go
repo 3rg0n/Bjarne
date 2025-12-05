@@ -63,6 +63,58 @@ func (c *ContainerRuntime) ImageExists(ctx context.Context) bool {
 	return cmd.Run() == nil
 }
 
+// GetLocalImageDigest returns the digest of the local image, or empty string if not found
+func (c *ContainerRuntime) GetLocalImageDigest(ctx context.Context) string {
+	cmd := exec.CommandContext(ctx, c.binary, "image", "inspect", "--format", "{{.Digest}}", c.imageName)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// GetRemoteImageDigest returns the digest of the remote image without pulling it
+func (c *ContainerRuntime) GetRemoteImageDigest(ctx context.Context) string {
+	// Use skopeo-style inspection via podman/docker manifest inspect
+	cmd := exec.CommandContext(ctx, c.binary, "manifest", "inspect", c.imageName)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	// Parse the digest from manifest - look for "digest" field
+	// The manifest contains a digest in the response
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, `"digest"`) {
+			// Extract digest value like "sha256:abc123..."
+			parts := strings.Split(line, `"`)
+			for i, part := range parts {
+				if part == "digest" && i+2 < len(parts) {
+					return parts[i+2]
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// CheckForUpdate checks if a newer container image is available
+// Returns true if an update is available, false otherwise
+func (c *ContainerRuntime) CheckForUpdate(ctx context.Context) bool {
+	localDigest := c.GetLocalImageDigest(ctx)
+	if localDigest == "" {
+		return false // No local image, not an "update" scenario
+	}
+
+	remoteDigest := c.GetRemoteImageDigest(ctx)
+	if remoteDigest == "" {
+		return false // Can't check remote, assume no update
+	}
+
+	// Compare digests - if different, update available
+	return localDigest != remoteDigest
+}
+
 // PullImage pulls the validation container image
 func (c *ContainerRuntime) PullImage(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, c.binary, "pull", c.imageName)
