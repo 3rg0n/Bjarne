@@ -138,10 +138,20 @@ const IterationPromptTemplate = `Validation failed. Fix the code.
 Errors:
 %s
 
+Common fixes by sanitizer:
+- MSan (uninitialized memory): Initialize ALL variables at declaration. Use = 0, = {}, or = nullptr.
+- ASAN (memory errors): Check array bounds, avoid use-after-free, use smart pointers.
+- UBSAN (undefined behavior): Avoid signed overflow, null deref, invalid shifts.
+- TSAN (data races): Use mutex/atomic for shared data between threads.
+- compile: Fix syntax errors, add missing includes, resolve type mismatches.
+
+IMPORTANT: If the original request conflicts with safe code (e.g., "return uninitialized value"),
+reinterpret it safely - return a default/sentinel value instead and document the change.
+
 Requirements:
-- Must pass clang-tidy, cppcheck, ASAN, UBSAN, MSan, TSAN
+- Must pass all sanitizers
 - Functions: CCN <= 15, length <= 100 lines
-- Same functionality
+- Maintain intended functionality (safely)
 
 Provide corrected code in a cpp block.`
 
