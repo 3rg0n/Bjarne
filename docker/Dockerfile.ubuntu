@@ -40,6 +40,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install lizard for complexity metrics
 RUN pip3 install --break-system-packages lizard
 
+# Build MSan-instrumented libc++ for MemorySanitizer support
+# MSan requires ALL code (including stdlib) to be instrumented
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake \
+    ninja-build \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone LLVM and build MSan-instrumented libc++
+RUN git clone --depth 1 --branch llvmorg-21.0.0 https://github.com/llvm/llvm-project.git /tmp/llvm \
+    && cmake -G Ninja -S /tmp/llvm/runtimes -B /tmp/llvm/build \
+        -DCMAKE_C_COMPILER=clang-21 \
+        -DCMAKE_CXX_COMPILER=clang++-21 \
+        -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" \
+        -DLLVM_USE_SANITIZER=MemoryWithOrigins \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLIBCXX_ENABLE_SHARED=OFF \
+        -DLIBCXXABI_ENABLE_SHARED=OFF \
+    && ninja -C /tmp/llvm/build cxx cxxabi \
+    && mkdir -p /opt/msan \
+    && cp -r /tmp/llvm/build/include /opt/msan/ \
+    && cp -r /tmp/llvm/build/lib /opt/msan/ \
+    && rm -rf /tmp/llvm
+
+# Set MSan library path for runtime
+ENV MSAN_LIBCXX_PATH=/opt/msan
+
 # Create symbolic links for easier invocation
 RUN update-alternatives --install /usr/bin/clang clang /usr/bin/clang-21 100 && \
     update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-21 100 && \
@@ -52,6 +79,7 @@ ENV ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer
 ENV ASAN_OPTIONS=symbolize=1:detect_leaks=1:print_stacktrace=1
 ENV UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 ENV TSAN_OPTIONS=second_deadlock_stack=1
+ENV MSAN_OPTIONS=symbolize=1:print_stacktrace=1:halt_on_error=1
 
 # Create working directory with proper permissions
 WORKDIR /workspace

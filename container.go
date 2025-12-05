@@ -292,11 +292,15 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 	}
 
 	// Stage 8: MSan (MemorySanitizer) - detects uninitialized memory reads
-	// Note: MSan requires code to not link against uninstrumented libraries
-	// We use -stdlib=libc++ for better MSan compatibility
+	// MSan requires ALL code (including stdlib) to be instrumented
+	// We use custom-built MSan-instrumented libc++ from /opt/msan
 	result = runStage("msan",
 		"sh", "-c",
-		"clang++ -std=c++17 -fsanitize=memory -fno-omit-frame-pointer -g -stdlib=libc++ -o /tmp/test /src/"+filename+" && /tmp/test")
+		"clang++ -std=c++17 -fsanitize=memory -fsanitize-memory-track-origins "+
+			"-fno-omit-frame-pointer -g -stdlib=libc++ "+
+			"-nostdinc++ -isystem /opt/msan/include/c++/v1 "+
+			"-L/opt/msan/lib -Wl,-rpath,/opt/msan/lib "+
+			"-o /tmp/test /src/"+filename+" && /tmp/test")
 	results = append(results, result)
 	if !result.Success {
 		return results, nil
