@@ -9,8 +9,9 @@ import (
 
 // Version information (set via ldflags during build)
 var (
-	Version   = "dev"
-	BuildDate = "unknown"
+	Version = "dev"
+	Commit  = "none"
+	Date    = "unknown"
 )
 
 func main() {
@@ -18,7 +19,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "--version", "-V":
-			fmt.Printf("bjarne %s (built %s)\n", Version, BuildDate)
+			fmt.Printf("bjarne %s (%s, built %s)\n", Version, Commit, Date)
 			fmt.Println("AI-assisted C/C++ code generation with mandatory validation")
 			os.Exit(0)
 		case "--help", "-h":
@@ -136,10 +137,12 @@ Interactive Commands (in REPL):
   /quit                Exit bjarne
 
 Environment Variables:
+  BJARNE_PROVIDER         LLM provider: bedrock|anthropic|openai|gemini (default: bedrock)
+  BJARNE_API_KEY          API key for Anthropic/OpenAI/Gemini providers
   AWS_ACCESS_KEY_ID       AWS credentials for Bedrock
   AWS_SECRET_ACCESS_KEY   AWS credentials for Bedrock
   AWS_REGION              AWS region (default: us-east-1)
-  BJARNE_MODEL            Claude model ID (default: uses inference profile)
+  BJARNE_MODEL            Model name: haiku|sonnet|opus or specific model ID
   BJARNE_VALIDATOR_IMAGE  Custom validator container image
   BJARNE_MAX_ITERATIONS   Max validation retry attempts (default: 3)
   BJARNE_MAX_TOKENS       Max tokens per response (default: 8192)

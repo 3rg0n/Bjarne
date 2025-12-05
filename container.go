@@ -39,14 +39,17 @@ func DetectContainerRuntime() (*ContainerRuntime, error) {
 	return nil, ErrNoContainerRuntime()
 }
 
+// Default container image (published to ghcr.io on release)
+const defaultValidatorImage = "ghcr.io/3rg0n/bjarne-validator:latest"
+
 // getImageName returns the container image to use
 func getImageName() string {
-	// Check for local development override
+	// Check for override (local development or custom image)
 	if img := os.Getenv("BJARNE_VALIDATOR_IMAGE"); img != "" {
 		return img
 	}
 	// Default to ghcr.io hosted image
-	return "bjarne-validator:local"
+	return defaultValidatorImage
 }
 
 // GetBinary returns the container runtime binary name

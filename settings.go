@@ -89,7 +89,7 @@ func DefaultSettings() *Settings {
 			MaxPerSession:  150000,
 		},
 		Container: ContainerSettings{
-			Image: "bjarne-validator:local",
+			Image: defaultValidatorImage,
 		},
 		Theme: ThemeSettings{
 			Name: "default",

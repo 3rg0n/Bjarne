@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: bjarne
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: bjarne
+    main: .
+    binary: bjarne
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.Commit={{.ShortCommit}}
+      - -X main.Date={{.Date}}
+    # Windows-specific naming
+    hooks:
+      post:
+        - cmd: '{{ if eq .Os "windows" }}echo "Built Windows binary"{{ end }}'
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    # Windows gets zip
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: 3rg0n
+    name: bjarne
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+
+# Homebrew tap
+brews:
+  - repository:
+      owner: 3rg0n
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/3rg0n/bjarne"
+    description: "AI-assisted C/C++ code generation with rigorous validation"
+    license: "MIT"
+    install: |
+      bin.install "bjarne"
+    test: |
+      system "#{bin}/bjarne", "--version"
+    dependencies:
+      - name: podman
+        type: optional
+    caveats: |
+      bjarne requires podman or docker for code validation.
+      Install with: brew install podman
+
+# Scoop bucket for Windows
+scoops:
+  - repository:
+      owner: 3rg0n
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+    homepage: "https://github.com/3rg0n/bjarne"
+    description: "AI-assisted C/C++ code generation with rigorous validation"
+    license: "MIT"
+
+# Announce releases
+announce:
+  skip: true
