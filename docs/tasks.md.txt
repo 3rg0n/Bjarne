@@ -26,7 +26,11 @@ _Last reviewed: 2025-12-05_
     - GPT-5.1-Codex-Max (agentic coding, long-horizon tasks, context compaction)
     - Reasoning effort levels: medium, high, xhigh
   - Google Gemini API
-    - Gemini 3 Pro
+    - Model: gemini-3-pro-preview (1M context in / 64k out)
+    - Thinking levels: low (fast), high (default, deep reasoning) - NO medium
+    - Temperature: keep at 1.0 (required for reasoning)
+    - Thought signatures: must return for multi-turn reasoning
+    - Pricing: $2/$12 per 1M tokens (<200k), $4/$18 (>200k)
   - Config: BJARNE_PROVIDER=bedrock|anthropic|openai|gemini
   - Config: BJARNE_API_KEY for non-Bedrock providers
   - Abstract LLM interface: Generate(ctx, model, system, messages, maxTokens)
