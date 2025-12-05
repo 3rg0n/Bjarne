@@ -296,7 +296,7 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 	// We use -stdlib=libc++ for better MSan compatibility
 	result = runStage("msan",
 		"sh", "-c",
-		"clang++ -std=c++17 -fsanitize=memory -fno-omit-frame-pointer -g -o /tmp/test /src/"+filename+" && /tmp/test")
+		"clang++ -std=c++17 -fsanitize=memory -fno-omit-frame-pointer -g -stdlib=libc++ -o /tmp/test /src/"+filename+" && /tmp/test")
 	results = append(results, result)
 	if !result.Success {
 		return results, nil
