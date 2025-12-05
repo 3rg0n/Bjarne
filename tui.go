@@ -794,28 +794,44 @@ func (m *Model) buildSystemPrompt() string {
 		}
 
 		if query != "" {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
-			chunks, err := m.vectorIndex.SearchSimilar(ctx, query, 5) // Top 5 relevant chunks
+			// Retrieve up to 20 relevant chunks (similar to Cody)
+			chunks, err := m.vectorIndex.SearchSimilar(ctx, query, 20)
 			if err == nil && len(chunks) > 0 {
 				var contextBuilder strings.Builder
 				contextBuilder.WriteString("<relevant_code_context>\n")
-				contextBuilder.WriteString("The following code from the project may be relevant:\n\n")
+				contextBuilder.WriteString("The following code from the project is semantically relevant to the request.\n")
+				contextBuilder.WriteString("Use these patterns and styles when generating code:\n\n")
 
-				for _, chunk := range chunks {
-					contextBuilder.WriteString(fmt.Sprintf("// %s (%s)\n", chunk.Name, chunk.Type))
-					// Truncate content if too long
+				// Track total size to avoid exceeding token limits (~8000 chars ≈ 2000 tokens)
+				const maxContextChars = 8000
+				totalChars := 0
+
+				for i, chunk := range chunks {
+					// Get file path from chunk
+					filePath := m.getChunkFilePath(chunk.FileID)
+
+					header := fmt.Sprintf("// [%d] %s::%s (%s)\n", i+1, filePath, chunk.Name, chunk.Type)
 					content := chunk.Content
-					if len(content) > 500 {
-						content = content[:500] + "\n// ... (truncated)"
+
+					// Check if adding this chunk would exceed limit
+					chunkSize := len(header) + len(content) + 10
+					if totalChars+chunkSize > maxContextChars && totalChars > 0 {
+						contextBuilder.WriteString(fmt.Sprintf("\n// ... and %d more relevant chunks (truncated for context window)\n", len(chunks)-i))
+						break
 					}
+
+					contextBuilder.WriteString(header)
 					contextBuilder.WriteString(content)
 					contextBuilder.WriteString("\n\n")
+					totalChars += chunkSize
 				}
 				contextBuilder.WriteString("</relevant_code_context>\n")
 
-				prompt += "\n\n" + contextBuilder.String() + "\nIntegrate with the existing codebase where appropriate."
+				prompt += "\n\n" + contextBuilder.String()
+				prompt += "\nFollow the patterns and conventions shown in the relevant code context above."
 				return prompt
 			}
 		}
@@ -830,6 +846,22 @@ func (m *Model) buildSystemPrompt() string {
 	}
 
 	return prompt
+}
+
+// getChunkFilePath retrieves the file path for a chunk's file ID
+func (m *Model) getChunkFilePath(fileID int64) string {
+	if m.vectorIndex == nil {
+		return "unknown"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	path, err := m.vectorIndex.GetFilePath(ctx, fileID)
+	if err != nil {
+		return "unknown"
+	}
+	return path
 }
 
 func (m *Model) startValidation() (Model, tea.Cmd) {
@@ -1363,11 +1395,35 @@ func StartTUI() error {
 		workspaceIndex = idx
 		fmt.Printf("Workspace index: %d files, %d functions, %d classes\n",
 			idx.Summary.TotalFiles, idx.Summary.TotalFunctions, idx.Summary.TotalClasses)
-		fmt.Println()
 	}
+
+	// Try to load existing vector index for semantic search
+	var vectorIndex *VectorIndex
+	vecCfg := DefaultVectorIndexConfig()
+	if vi, err := NewVectorIndex(vecCfg); err == nil {
+		// Check if index has embeddings
+		_, chunks, embeddings, _ := vi.GetStats(ctx)
+		if embeddings > 0 {
+			// Initialize embedder for search
+			_ = vi.EnsureModel(ctx, nil)
+			vectorIndex = vi
+			fmt.Printf("Semantic index: %d chunks, %d embeddings\n", chunks, embeddings)
+
+			// Quick incremental update for changed files (non-blocking)
+			go func() {
+				updateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				_ = vi.IndexWorkspaceWithEmbeddings(updateCtx, cwd, nil)
+			}()
+		} else {
+			_ = vi.Close()
+		}
+	}
+	fmt.Println()
 
 	m := NewModel(provider, container, cfg)
 	m.workspaceIndex = workspaceIndex
+	m.vectorIndex = vectorIndex
 	// Don't use WithAltScreen() - keeps normal terminal scrollback history
 	p := tea.NewProgram(m)
 

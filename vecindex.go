@@ -647,6 +647,13 @@ func (vi *VectorIndex) GetStats(ctx context.Context) (files, chunks, embeddings 
 	return
 }
 
+// GetFilePath returns the file path for a given file ID
+func (vi *VectorIndex) GetFilePath(ctx context.Context, fileID int64) (string, error) {
+	var path string
+	err := vi.db.QueryRowContext(ctx, "SELECT path FROM files WHERE id = ?", fileID).Scan(&path)
+	return path, err
+}
+
 // Helper functions for vector operations
 
 func float32sToBytes(floats []float32) []byte {
