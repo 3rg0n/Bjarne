@@ -20,12 +20,22 @@ _Last reviewed: 2025-12-05_
 
 - [ ] Multi-provider LLM support (beyond Bedrock)
   - Anthropic API direct (claude.ai)
-  - OpenAI API (GPT-4, GPT-4o)
+    - Claude Haiku, Sonnet, Opus (same models, direct API)
+  - OpenAI API
+    - GPT-5.1 (general reasoning)
+    - GPT-5.1-Codex-Max (agentic coding, long-horizon tasks, context compaction)
+    - Reasoning effort levels: medium, high, xhigh
   - Google Gemini API
+    - Gemini 3 Pro
   - Config: BJARNE_PROVIDER=bedrock|anthropic|openai|gemini
   - Config: BJARNE_API_KEY for non-Bedrock providers
   - Abstract LLM interface: Generate(ctx, model, system, messages, maxTokens)
-  - Model mapping per provider (e.g., "haiku" -> provider-specific model ID)
+  - Model mapping per provider:
+    - "haiku" -> claude-3-5-haiku / gpt-5.1 / gemini-3-pro
+    - "sonnet" -> claude-3-5-sonnet / gpt-5.1 / gemini-3-pro
+    - "opus" -> claude-opus-4 / gpt-5.1-codex-max / gemini-3-pro
+  - Note: GPT-5.1-Codex-Max supports multi-hour autonomous sessions with context
+    compaction over millions of tokens - ideal for complex refactors
 
 - [ ] Easy installation / distribution
   - Goal: `something install -g bjarne` that just works
