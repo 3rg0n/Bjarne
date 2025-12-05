@@ -1,15 +1,15 @@
-# Binaries
-bjarne
-bjarne.exe
+# Binaries (root level only)
+/bjarne
+/bjarne.exe
 bjarne-*
-*.exe
 *.dll
-*.so
-*.dylib
 
 # Build output
 dist/
 bin/
+
+# Pre-built releases tracked via Git LFS
+!releases/
 
 # Test artifacts
 *.test
