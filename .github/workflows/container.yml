@@ -14,7 +14,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-validator
+  # github.repository preserves case, but Docker requires lowercase
+  IMAGE_NAME: 3rg0n/bjarne-validator
 
 jobs:
   build:
