@@ -92,6 +92,8 @@ type Model struct {
 	dod            *DefinitionOfDone // Definition of Done for complex tasks
 	difficulty     string            // EASY, MEDIUM, COMPLEX from classification
 	intent         string            // NEW, CONTINUE, QUESTION from classification
+	savedPath      string            // Path where code was last saved (empty = unsaved)
+	historyPath    string            // Path to auto-saved history file
 
 	// Escalation tracking
 	currentIteration   int      // Current fix attempt within current model
@@ -265,9 +267,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
-				// Handle commands
+				// Handle slash commands
 				if strings.HasPrefix(input, "/") {
 					return m.handleCommand(input)
+				}
+
+				// Handle natural language commands (T-038e)
+				if cmd, args, isCmd := parseNaturalCommand(input); isCmd {
+					m.textarea.Reset()
+					if args != "" {
+						return m.handleCommand(cmd + " " + args)
+					}
+					return m.handleCommand(cmd)
 				}
 
 				m.textarea.Reset()
@@ -411,14 +422,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, textarea.Blink
 		}
 
-		if m.difficulty == "EASY" && !containsQuestion(reflection) {
-			// Skip confirmation for easy tasks - generate immediately
-			// But only if the analysis doesn't ask clarifying questions
+		// Auto-proceed conditions (T-038f):
+		// - EASY tasks: straightforward, no need to confirm
+		// - CONTINUE intent: user is iterating on existing code
+		// But only if the analysis doesn't ask clarifying questions
+		if (m.difficulty == "EASY" || m.intent == "CONTINUE") && !containsQuestion(reflection) {
 			m.conversation = append(m.conversation, Message{Role: "user", Content: GenerateNowPrompt})
 			return m.startGenerating()
 		}
 
-		// For MEDIUM/COMPLEX: wait for user input before generating
+		// For NEW MEDIUM/COMPLEX: wait for user input before generating
 		m.analyzed = true // Next input goes to acknowledgment
 		m.state = StateInput
 		m.textarea.Focus()
@@ -516,7 +529,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if allPassed {
 			m.validated = true
 			m.analyzed = false // Reset for next prompt
+			m.savedPath = ""   // Reset saved state for new code
 			m.resetEscalation()
+
+			// Auto-save to history
+			m.historyPath = m.autoSaveToHistory()
 
 			// Start animated code reveal
 			totalTime := m.showValidationSuccess(msg.results)
@@ -609,7 +626,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.addOutput("```")
 		m.addOutput("")
 		m.addOutput(fmt.Sprintf("Total validation time: %s", m.styles.Dim.Render(fmt.Sprintf("%.2fs", m.revealTotalTime))))
-		m.addOutput(fmt.Sprintf("Use %s to save", m.styles.Accent.Render("/save <filename>")))
+		if m.historyPath != "" {
+			m.addOutput(fmt.Sprintf("Auto-saved to: %s", m.styles.Dim.Render(m.historyPath)))
+		}
+		m.addOutput(fmt.Sprintf("Use %s to save to working directory", m.styles.Accent.Render("/save <filename>")))
 		m.state = StateInput
 		m.textarea.Focus()
 		return m, textarea.Blink
@@ -624,6 +644,10 @@ func (m Model) View() string {
 	// Only show current input/status line (output is printed directly to stdout)
 	switch m.state {
 	case StateInput:
+		// Show unsaved indicator if there's validated code not yet saved
+		if m.hasUnsavedCode() {
+			b.WriteString(m.styles.Warning.Render("[*] "))
+		}
 		b.WriteString(m.styles.Prompt.Render(">") + " ")
 		b.WriteString(m.textarea.View())
 
@@ -1130,6 +1154,84 @@ func (m *Model) buildRevealLines() []string {
 	return lines
 }
 
+// autoSaveToHistory saves validated code to ~/.bjarne/history/ with timestamp
+func (m *Model) autoSaveToHistory() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	historyDir := filepath.Join(homeDir, ".bjarne", "history")
+	if err := os.MkdirAll(historyDir, 0750); err != nil {
+		return ""
+	}
+
+	// Generate filename with timestamp
+	timestamp := time.Now().Format("2006-01-02_150405")
+	var filename string
+
+	if len(m.currentFiles) > 1 {
+		// Multi-file: save as directory
+		dirName := fmt.Sprintf("%s_project", timestamp)
+		dirPath := filepath.Join(historyDir, dirName)
+		if err := os.MkdirAll(dirPath, 0750); err != nil {
+			return ""
+		}
+		for _, f := range m.currentFiles {
+			filePath := filepath.Join(dirPath, f.Filename)
+			_ = os.WriteFile(filePath, []byte(f.Content), 0600)
+		}
+		return dirPath
+	}
+
+	// Single file
+	filename = fmt.Sprintf("%s.cpp", timestamp)
+	filePath := filepath.Join(historyDir, filename)
+	if err := os.WriteFile(filePath, []byte(m.currentCode), 0600); err != nil {
+		return ""
+	}
+	return filePath
+}
+
+// hasUnsavedCode returns true if there's validated code that hasn't been explicitly saved
+func (m *Model) hasUnsavedCode() bool {
+	return m.validated && m.savedPath == ""
+}
+
+// parseNaturalCommand converts natural language to commands
+// Returns (command, args, isCommand)
+func parseNaturalCommand(input string) (string, string, bool) {
+	lower := strings.ToLower(input)
+
+	// "save as <filename>" or "save to <filename>"
+	if strings.HasPrefix(lower, "save as ") {
+		return "/save", strings.TrimPrefix(input, input[:8]), true
+	}
+	if strings.HasPrefix(lower, "save to ") {
+		return "/save", strings.TrimPrefix(input, input[:8]), true
+	}
+	if lower == "save" || lower == "save it" || lower == "save this" {
+		return "/save", "", true
+	}
+
+	// "start fresh" or "start over" or "new task"
+	if lower == "start fresh" || lower == "start over" || lower == "new task" || lower == "clear" {
+		return "/clear", "", true
+	}
+
+	// "show code" or "show the code"
+	if lower == "show code" || lower == "show the code" || lower == "show it" {
+		return "/code", "", true
+	}
+
+	// "quit" or "exit"
+	if lower == "quit" || lower == "exit" || lower == "bye" {
+		return "/quit", "", true
+	}
+
+	return "", "", false
+}
+
 func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 	parts := strings.Fields(input)
 	cmd := strings.ToLower(parts[0])
@@ -1140,14 +1242,22 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 
 	case "/help", "/h":
 		m.addOutput("")
-		m.addOutput("Available Commands:")
+		m.addOutput("Commands:")
 		m.addOutput("  /help, /h              Show this help")
 		m.addOutput("  /init                  Index current directory for context-aware generation")
 		m.addOutput("  /save [file|dir], /s   Save code (multi-file: /save dir/ or /save)")
-		m.addOutput("  /clear, /c             Clear conversation")
+		m.addOutput("  /clear, /c             Clear conversation and start fresh")
 		m.addOutput("  /code, /show           Show last generated code")
 		m.addOutput("  /tokens, /t            Show token usage")
 		m.addOutput("  /quit, /q              Exit bjarne")
+		m.addOutput("")
+		m.addOutput("Natural Language:")
+		m.addOutput("  \"save as <file>\"       Same as /save <file>")
+		m.addOutput("  \"start fresh\"          Same as /clear")
+		m.addOutput("  \"show code\"            Same as /code")
+		m.addOutput("")
+		m.addOutput("Indicators:")
+		m.addOutput("  [*] >                  Unsaved validated code (auto-saved to ~/.bjarne/history/)")
 		m.addOutput("")
 
 	case "/init":
@@ -1254,6 +1364,9 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.examples = nil
 		m.dod = nil
 		m.difficulty = ""
+		m.intent = ""
+		m.savedPath = ""
+		m.historyPath = ""
 		m.resetEscalation()
 		m.tokenTracker.Reset()
 		m.workspaceIndex = nil // Also clear the index on /clear
@@ -1301,13 +1414,18 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 						break
 					}
 					m.addOutput("")
+					savedCount := 0
 					for _, f := range m.currentFiles {
 						filePath := filepath.Join(targetDir, f.Filename)
 						if err := saveToFile(filePath, f.Content); err != nil {
 							m.addOutput(m.styles.Error.Render(fmt.Sprintf("Error saving %s: %s", f.Filename, err.Error())))
 						} else {
 							m.addOutput(m.styles.Success.Render(fmt.Sprintf("✓ Saved %s", filePath)))
+							savedCount++
 						}
+					}
+					if savedCount == len(m.currentFiles) {
+						m.savedPath = targetDir // Mark as saved
 					}
 				} else {
 					// Single filename - save combined (backwards compatible)
@@ -1317,17 +1435,23 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 						m.addOutput("")
 						m.addOutput(m.styles.Success.Render("✓ Saved to " + targetDir))
 						m.addOutput(m.styles.Dim.Render("  (all files combined into single file)"))
+						m.savedPath = targetDir // Mark as saved
 					}
 				}
 			} else {
 				// No target specified - save to current directory with original filenames
 				m.addOutput("")
+				savedCount := 0
 				for _, f := range m.currentFiles {
 					if err := saveToFile(f.Filename, f.Content); err != nil {
 						m.addOutput(m.styles.Error.Render(fmt.Sprintf("Error saving %s: %s", f.Filename, err.Error())))
 					} else {
 						m.addOutput(m.styles.Success.Render(fmt.Sprintf("✓ Saved %s", f.Filename)))
+						savedCount++
 					}
+				}
+				if savedCount == len(m.currentFiles) {
+					m.savedPath = "." // Mark as saved to current dir
 				}
 			}
 		} else {
@@ -1345,6 +1469,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 					if info, err := os.Stat(filename); err == nil {
 						m.addOutput(m.styles.Dim.Render(fmt.Sprintf("  %d bytes written", info.Size())))
 					}
+					m.savedPath = filename // Mark as saved
 				}
 			}
 		}
