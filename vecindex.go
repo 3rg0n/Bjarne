@@ -160,34 +160,47 @@ func (vi *VectorIndex) EnsureModel(ctx context.Context, progressFn func(string))
 	tokenizerFile := filepath.Join(vi.modelPath, "tokenizer.json")
 
 	// Check if model exists
+	modelExists := false
 	if _, err := os.Stat(modelFile); err == nil {
 		if _, err := os.Stat(tokenizerFile); err == nil {
 			if progressFn != nil {
 				progressFn("Model already downloaded")
 			}
-			return nil
+			modelExists = true
 		}
 	}
 
-	if progressFn != nil {
-		progressFn("Downloading BGE-small embedding model (~35MB)...")
+	if !modelExists {
+		if progressFn != nil {
+			progressFn("Downloading BGE-small embedding model (~35MB)...")
+		}
+
+		// Download model
+		if err := downloadFile(ctx, BGESmallModelURL, modelFile, progressFn); err != nil {
+			return fmt.Errorf("failed to download model: %w", err)
+		}
+
+		// Download tokenizer
+		if progressFn != nil {
+			progressFn("Downloading tokenizer...")
+		}
+		if err := downloadFile(ctx, BGESmallTokenizer, tokenizerFile, progressFn); err != nil {
+			return fmt.Errorf("failed to download tokenizer: %w", err)
+		}
+
+		if progressFn != nil {
+			progressFn("Model ready!")
+		}
 	}
 
-	// Download model
-	if err := downloadFile(ctx, BGESmallModelURL, modelFile, progressFn); err != nil {
-		return fmt.Errorf("failed to download model: %w", err)
-	}
-
-	// Download tokenizer
-	if progressFn != nil {
-		progressFn("Downloading tokenizer...")
-	}
-	if err := downloadFile(ctx, BGESmallTokenizer, tokenizerFile, progressFn); err != nil {
-		return fmt.Errorf("failed to download tokenizer: %w", err)
-	}
-
-	if progressFn != nil {
-		progressFn("Model ready!")
+	// Initialize embedder
+	if vi.embedder == nil {
+		vi.embedder = NewEmbedder(modelFile, tokenizerFile)
+		if IsONNXAvailable() {
+			if progressFn != nil {
+				progressFn("Initializing ONNX embedder...")
+			}
+		}
 	}
 
 	return nil
@@ -363,12 +376,12 @@ func (vi *VectorIndex) IndexWorkspaceWithEmbeddings(ctx context.Context, rootPat
 	}
 	defer func() { _ = stmt.Close() }()
 
-	for _, chunk := range allChunks {
-		result, err := stmt.ExecContext(ctx, chunk.FileID, chunk.Type, chunk.Name, chunk.Content, chunk.StartLine, chunk.EndLine)
+	for i := range allChunks {
+		result, err := stmt.ExecContext(ctx, allChunks[i].FileID, allChunks[i].Type, allChunks[i].Name, allChunks[i].Content, allChunks[i].StartLine, allChunks[i].EndLine)
 		if err != nil {
 			continue
 		}
-		chunk.ID, _ = result.LastInsertId()
+		allChunks[i].ID, _ = result.LastInsertId()
 	}
 
 	if err := tx.Commit(); err != nil {
