@@ -1064,6 +1064,19 @@ func (m *Model) doValidation(ctx context.Context) tea.Cmd {
 			// Single file validation (backwards compatible)
 			results, err = m.container.ValidateCodeWithExamples(ctx, m.currentCode, "code.cpp", m.examples, m.dod)
 		}
+
+		// If core validation passed, run domain-specific validators
+		if err == nil && allPassed(results) && m.validatorConfig != nil {
+			domainResults := m.runDomainValidators(ctx)
+			for _, dr := range domainResults {
+				results = append(results, ValidationResult{
+					Stage:   string(dr.ValidatorID),
+					Success: dr.Success,
+					Output:  dr.Output,
+				})
+			}
+		}
+
 		return validationDoneMsg{results: results, err: err}
 	}
 }
@@ -1942,4 +1955,44 @@ func (m *Model) showValidatorConfig(args []string) {
 	}
 
 	m.addOutput(m.styles.Dim.Render("Usage: /config <category|validator> to toggle"))
+}
+
+// allPassed checks if all validation results passed
+func allPassed(results []ValidationResult) bool {
+	for _, r := range results {
+		if !r.Success {
+			return false
+		}
+	}
+	return true
+}
+
+// runDomainValidators executes enabled domain-specific validators
+func (m *Model) runDomainValidators(ctx context.Context) []DomainValidationResult {
+	// Create temp directory for validation
+	tmpDir, err := os.MkdirTemp("", "bjarne-domain-*")
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Determine code and filename
+	var code, filename string
+	if len(m.currentFiles) > 0 {
+		// Use main file for domain validation
+		code = m.currentFiles[0].Content
+		filename = m.currentFiles[0].Filename
+	} else {
+		code = m.currentCode
+		filename = "code.cpp"
+	}
+
+	// Write code to temp directory
+	codePath := filepath.Join(tmpDir, filename)
+	if err := os.WriteFile(codePath, []byte(code), 0600); err != nil {
+		return nil
+	}
+
+	// Run domain validators
+	return m.container.RunDomainValidators(ctx, tmpDir, code, filename, m.validatorConfig)
 }
