@@ -138,6 +138,23 @@ RULES:
 6. Handle memory safely (RAII, smart pointers)
 7. If using threads, ensure proper synchronization
 
+MSAN COMPLIANCE (uninitialized memory - CRITICAL):
+MSan will FAIL if any variable is read before being initialized. You MUST:
+- Initialize ALL variables at declaration: int x = 0; not int x;
+- Initialize ALL struct/class members in constructors or with default values
+- Initialize ALL array elements: int arr[10] = {}; not int arr[10];
+- Initialize ALL pointers: int* p = nullptr; not int* p;
+- Use {} or = 0 for primitive types, = nullptr for pointers
+- For classes: use member initializer lists or in-class initializers
+- NEVER read from uninitialized memory, even if you plan to write first
+
+Common MSan failures to avoid:
+- Declaring int x; then using x before assignment
+- Struct members without default initialization
+- Array elements accessed before being set
+- Pointer arithmetic on uninitialized pointers
+- Reading padding bytes in structs
+
 BANNED UNSAFE FUNCTIONS (CWE-242, CWE-676):
 
 STRING FUNCTIONS (buffer overflow risk):
