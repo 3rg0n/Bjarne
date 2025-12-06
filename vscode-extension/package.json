@@ -1,0 +1,96 @@
+{
+  "name": "bjarne",
+  "displayName": "Bjarne - AI C/C++ Assistant",
+  "description": "AI-assisted C/C++ code generation with mandatory validation gates (ASAN, UBSAN, TSAN, MSan)",
+  "version": "0.1.0",
+  "publisher": "3rg0n",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/3rg0n/bjarne"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "c++",
+    "cpp",
+    "c",
+    "sanitizer",
+    "asan",
+    "ubsan",
+    "ai",
+    "code generation"
+  ],
+  "activationEvents": [
+    "onLanguage:cpp",
+    "onLanguage:c"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "bjarne.generate",
+        "title": "Bjarne: Generate Code from Prompt"
+      },
+      {
+        "command": "bjarne.validate",
+        "title": "Bjarne: Validate Current File"
+      },
+      {
+        "command": "bjarne.chat",
+        "title": "Bjarne: Open Chat Panel"
+      }
+    ],
+    "configuration": {
+      "title": "Bjarne",
+      "properties": {
+        "bjarne.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to bjarne binary (if not in PATH)"
+        },
+        "bjarne.containerImage": {
+          "type": "string",
+          "default": "ghcr.io/3rg0n/bjarne-validator:latest",
+          "description": "Docker/Podman image for validation"
+        },
+        "bjarne.provider": {
+          "type": "string",
+          "enum": ["bedrock", "anthropic", "openai", "gemini"],
+          "default": "bedrock",
+          "description": "LLM provider to use"
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "when": "resourceLangId == cpp || resourceLangId == c",
+          "command": "bjarne.validate",
+          "group": "bjarne"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.2",
+    "@vscode/vsce": "^2.22.0"
+  }
+}
