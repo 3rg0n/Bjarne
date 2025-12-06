@@ -26,6 +26,7 @@ const (
 	StateGenerating
 	StateValidating
 	StateFixing    // Attempting to fix failed code
+	StateReviewing // LLM code review gate
 	StateRevealing // Animated code reveal
 )
 
@@ -158,6 +159,13 @@ type validationDoneMsg struct {
 
 type fixDoneMsg struct {
 	result *GenerateResult
+	err    error
+}
+
+type reviewDoneMsg struct {
+	result *GenerateResult
+	passed bool
+	issues string
 	err    error
 }
 
@@ -542,30 +550,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if allPassed {
-			m.validated = true
-			m.analyzed = false // Reset for next prompt
-			m.savedPath = ""   // Reset saved state for new code
-			m.resetEscalation()
-
-			// Auto-save to history
-			m.historyPath = m.autoSaveToHistory()
-
-			// Start animated code reveal
-			totalTime := m.showValidationSuccess(msg.results)
-			m.revealTotalTime = totalTime
-
-			// Build reveal lines with file separators for multi-file projects
-			m.revealLines = m.buildRevealLines()
-			m.revealCurrentLine = 0
-			m.state = StateRevealing
-
-			// Start the reveal animation
-			return m, func() tea.Msg {
-				return codeRevealMsg{
-					lines:       m.revealLines,
-					currentLine: 0,
-				}
-			}
+			// All sanitizer gates passed - now do LLM code review
+			return m.startReviewing(msg.results)
 		}
 
 		// Validation failed - check if escalation is enabled and we can retry
@@ -613,6 +599,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.currentCode = code
 		return m.startValidation()
+
+	case reviewDoneMsg:
+		if msg.err != nil {
+			if m.ctx.Err() == context.Canceled {
+				return m, nil
+			}
+			// Review failed but sanitizers passed - show code anyway
+			m.addOutput(m.styles.Warning.Render("Code review unavailable: " + msg.err.Error()))
+			return m.showValidatedCode()
+		}
+
+		if msg.passed {
+			// LLM review passed - show the validated code
+			m.addOutput(m.styles.Success.Render("  └─ Gate: review... PASS"))
+			return m.showValidatedCode()
+		}
+
+		// LLM review found issues - treat as validation failure
+		m.addOutput(m.styles.Error.Render("  └─ Gate: review... FAIL"))
+		m.addOutput(m.styles.Dim.Render("     " + msg.issues))
+		m.lastValidationErrs = "Code review: " + msg.issues
+
+		// Try to fix if we can escalate
+		if m.config.EscalateOnFailure && m.canEscalate() {
+			m.addOutput("")
+			m.addOutput("Review failed, refactoring...")
+			return m.startFix()
+		}
+
+		// Can't escalate - show partial success
+		m.addOutput("")
+		m.addOutput(m.styles.Warning.Render("Code passed sanitizers but failed review. Showing code anyway."))
+		return m.showValidatedCode()
 
 	case tickMsg:
 		// Update elapsed time display
@@ -666,7 +685,7 @@ func (m Model) View() string {
 		b.WriteString(m.styles.Prompt.Render(">") + " ")
 		b.WriteString(m.textarea.View())
 
-	case StateClassifying, StateThinking, StateAcknowledging, StateGenerating, StateValidating, StateFixing:
+	case StateClassifying, StateThinking, StateAcknowledging, StateGenerating, StateValidating, StateFixing, StateReviewing:
 		elapsed := time.Since(m.startTime).Seconds()
 		status := fmt.Sprintf("esc to interrupt · %.0fs", elapsed)
 		if m.tokenCount > 0 {
@@ -1001,6 +1020,85 @@ func (m *Model) doValidation(ctx context.Context) tea.Cmd {
 			results, err = m.container.ValidateCodeWithExamples(ctx, m.currentCode, "code.cpp", m.examples, m.dod)
 		}
 		return validationDoneMsg{results: results, err: err}
+	}
+}
+
+// startReviewing initiates the LLM code review gate
+func (m *Model) startReviewing(results []ValidationResult) (Model, tea.Cmd) {
+	m.state = StateReviewing
+	m.statusMsg = "Code review…"
+	m.startTime = time.Now()
+
+	// Show sanitizer gate results first
+	m.showValidationSuccess(results)
+	m.addOutput(m.styles.Info.Render("  ├─ Gate: review..."))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.ctx = ctx
+	m.cancelFn = cancel
+
+	return *m, tea.Batch(
+		m.spinner.Tick,
+		m.doReview(ctx),
+		tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
+	)
+}
+
+// doReview performs the LLM code review
+func (m *Model) doReview(ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		// Build review prompt with original request and generated code
+		reviewPrompt := fmt.Sprintf(CodeReviewPrompt, m.originalPrompt, m.currentCode)
+
+		// Use Haiku for fast review (it's a simple pass/fail check)
+		result, err := m.provider.Generate(ctx, m.config.ReflectionModel, "", []Message{
+			{Role: "user", Content: reviewPrompt},
+		}, 200)
+
+		if err != nil {
+			return reviewDoneMsg{err: err}
+		}
+
+		response := strings.TrimSpace(result.Text)
+		passed := strings.HasPrefix(strings.ToUpper(response), "PASS")
+		issues := ""
+		if !passed && strings.HasPrefix(strings.ToUpper(response), "FAIL:") {
+			issues = strings.TrimPrefix(response, "FAIL:")
+			issues = strings.TrimPrefix(issues, "Fail:")
+			issues = strings.TrimPrefix(issues, "fail:")
+			issues = strings.TrimSpace(issues)
+		} else if !passed {
+			issues = response // Use full response as issues if no FAIL: prefix
+		}
+
+		return reviewDoneMsg{result: result, passed: passed, issues: issues}
+	}
+}
+
+// showValidatedCode displays the final validated code and transitions to reveal
+func (m *Model) showValidatedCode() (Model, tea.Cmd) {
+	m.validated = true
+	m.analyzed = false // Reset for next prompt
+	m.savedPath = ""   // Reset saved state for new code
+	m.resetEscalation()
+
+	// Auto-save to history
+	m.historyPath = m.autoSaveToHistory()
+
+	m.addOutput("")
+	m.addOutput(m.styles.Success.Render("  >> All validation gates passed"))
+
+	// Build reveal lines with file separators for multi-file projects
+	m.revealLines = m.buildRevealLines()
+	m.revealCurrentLine = 0
+	m.state = StateRevealing
+
+	// Start the reveal animation
+	return *m, func() tea.Msg {
+		return codeRevealMsg{
+			lines:       m.revealLines,
+			currentLine: 0,
+		}
 	}
 }
 

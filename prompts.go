@@ -302,3 +302,29 @@ Be thorough but not verbose. Use bullets.
 End with questions if requirements are ambiguous, otherwise "Ready to implement."
 
 DO NOT generate code yet - only analysis.`
+
+// CodeReviewPrompt is used for the final LLM review gate after sanitizers pass
+// %s = original request, %s = generated code
+const CodeReviewPrompt = `You are a code reviewer. The following code has passed all sanitizer checks (ASAN, UBSAN, TSAN, MSan).
+
+ORIGINAL REQUEST:
+%s
+
+GENERATED CODE:
+` + "```cpp" + `
+%s
+` + "```" + `
+
+Review this code for:
+1. CORRECTNESS: Does it actually fulfill the original request?
+2. LOGIC ERRORS: Are there bugs the sanitizers can't catch? (off-by-one, wrong algorithm, etc.)
+3. EDGE CASES: Does it handle empty input, zero, negative, overflow, null?
+4. SECURITY: Any vulnerabilities beyond memory safety? (injection, race conditions in logic)
+5. API MISUSE: Are standard library functions used correctly?
+
+OUTPUT FORMAT (exactly one of these):
+- If the code is correct and fulfills the request: PASS
+- If there are issues that need fixing: FAIL: <brief list of issues>
+
+Be strict but fair. Minor style issues are not failures. Focus on correctness and safety.
+Output only PASS or FAIL: <issues> - nothing else.`
