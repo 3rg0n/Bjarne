@@ -122,8 +122,17 @@ CMD ["clang++", "--version"]
 # 1. Static Analysis (clang-tidy):
 #    clang-tidy /src/code.cpp -- -std=c++17 -Wall -Wextra
 #
-# 2. Compilation with warnings:
-#    clang++ -std=c++17 -Wall -Wextra -Werror -o /tmp/test /src/code.cpp
+# 2. Compilation with warnings + hardening flags:
+#    clang++ -std=c++17 -Wall -Wextra -Werror \
+#      -fstack-protector-all -D_FORTIFY_SOURCE=2 \
+#      -fPIE -pie -Wl,-z,relro -Wl,-z,now \
+#      -o /tmp/test /src/code.cpp
+#
+#    Hardening flags:
+#    - -fstack-protector-all: Stack buffer overflow detection
+#    - -D_FORTIFY_SOURCE=2: Runtime buffer overflow checks
+#    - -fPIE -pie: Position Independent Executable (ASLR)
+#    - -Wl,-z,relro -Wl,-z,now: Full RELRO (GOT protection)
 #
 # 3. AddressSanitizer (memory errors):
 #    clang++ -std=c++17 -fsanitize=address -fno-omit-frame-pointer -g -o /tmp/test /src/code.cpp

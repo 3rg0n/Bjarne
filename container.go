@@ -205,10 +205,11 @@ func (c *ContainerRuntime) ValidateMultiFileCodeWithExamples(ctx context.Context
 		results = append(results, result)
 	}
 
-	// Stage 3: Compile all source files together
+	// Stage 3: Compile all source files together with hardening flags
+	// Security hardening: stack protector, FORTIFY_SOURCE, PIE, RELRO
 	result = c.runValidationStage(ctx, tmpDir, "compile",
 		"sh", "-c",
-		"clang++ -std=c++17 -Wall -Wextra -Werror -fstack-protector-all -D_FORTIFY_SOURCE=2 -I/src -o /tmp/test "+srcArgs)
+		"clang++ -std=c++17 -Wall -Wextra -Werror -fstack-protector-all -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro -Wl,-z,now -I/src -o /tmp/test "+srcArgs)
 	results = append(results, result)
 	if !result.Success {
 		return results, nil
@@ -450,10 +451,12 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 		results = append(results, result)
 	}
 
-	// Stage 5: Compile with strict warnings
+	// Stage 5: Compile with strict warnings and hardening flags
+	// Security hardening: stack protector, FORTIFY_SOURCE, PIE, RELRO
 	result = runStage("compile",
 		"clang++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
 		"-fstack-protector-all", "-D_FORTIFY_SOURCE=2",
+		"-fPIE", "-pie", "-Wl,-z,relro", "-Wl,-z,now",
 		"-o", "/tmp/test", "/src/"+filename)
 	results = append(results, result)
 	if !result.Success {
