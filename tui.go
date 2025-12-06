@@ -118,14 +118,15 @@ type Model struct {
 	lastSummary    string // Last review summary
 
 	// Session data
-	provider       LLMProvider // Abstract LLM provider (Bedrock, Anthropic, OpenAI, Gemini)
-	container      *ContainerRuntime
-	config         *Config
-	tokenTracker   *TokenTracker
-	conversation   []Message
-	workspaceIndex *WorkspaceIndex // Indexed codebase for context
-	vectorIndex    *VectorIndex    // Semantic search index with embeddings
-	llmGuard       *LLMGuardClient // Optional LLM security scanner
+	provider        LLMProvider // Abstract LLM provider (Bedrock, Anthropic, OpenAI, Gemini)
+	container       *ContainerRuntime
+	config          *Config
+	tokenTracker    *TokenTracker
+	conversation    []Message
+	workspaceIndex  *WorkspaceIndex  // Indexed codebase for context
+	vectorIndex     *VectorIndex     // Semantic search index with embeddings
+	llmGuard        *LLMGuardClient  // Optional LLM security scanner
+	validatorConfig *ValidatorConfig // Domain-specific validator settings
 
 	// For async operations
 	ctx      context.Context
@@ -210,19 +211,20 @@ func NewModel(provider LLMProvider, container *ContainerRuntime, cfg *Config) Mo
 	}
 
 	return Model{
-		textarea:     ta,
-		spinner:      s,
-		styles:       NewStyles(),
-		state:        StateInput,
-		provider:     provider,
-		container:    container,
-		config:       cfg,
-		tokenTracker: NewTokenTracker(cfg.MaxTotalTokens, cfg.WarnTokenThreshold),
-		conversation: []Message{},
-		llmGuard:     NewLLMGuardClient(),
-		ctx:          context.Background(),
-		width:        120, // Default, will be updated on WindowSizeMsg
-		height:       24,
+		textarea:        ta,
+		spinner:         s,
+		styles:          NewStyles(),
+		state:           StateInput,
+		provider:        provider,
+		container:       container,
+		config:          cfg,
+		tokenTracker:    NewTokenTracker(cfg.MaxTotalTokens, cfg.WarnTokenThreshold),
+		conversation:    []Message{},
+		llmGuard:        NewLLMGuardClient(),
+		validatorConfig: DefaultValidatorConfig(),
+		ctx:             context.Background(),
+		width:           120, // Default, will be updated on WindowSizeMsg
+		height:          24,
 	}
 }
 
@@ -1463,6 +1465,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.addOutput("")
 		m.addOutput("Commands:")
 		m.addOutput("  /help, /h              Show this help")
+		m.addOutput("  /config [category]     Configure validators (game, hft, embedded, security, perf)")
 		m.addOutput("  /init                  Index current directory for context-aware generation")
 		m.addOutput("  /save [file|dir], /s   Save code (multi-file: /save dir/ or /save)")
 		m.addOutput("  /clear, /c             Clear conversation and start fresh")
@@ -1572,6 +1575,9 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 
 		m.addOutput("")
 		m.addOutput(m.styles.Info.Render("Context will be included in code generation prompts."))
+
+	case "/config":
+		m.showValidatorConfig(parts[1:])
 
 	case "/clear", "/c":
 		m.conversation = []Message{}
@@ -1837,4 +1843,103 @@ func providerDisplayName(p ProviderType) string {
 	default:
 		return string(p)
 	}
+}
+
+// showValidatorConfig displays and manages validator configuration
+func (m *Model) showValidatorConfig(args []string) {
+	m.addOutput("")
+
+	// Map short category names to full names
+	categoryMap := map[string]ValidatorCategory{
+		"game":     CategoryGame,
+		"hft":      CategoryHFT,
+		"embedded": CategoryEmbedded,
+		"security": CategorySecurity,
+		"perf":     CategoryPerformance,
+		"core":     CategoryCore,
+	}
+
+	// If arg provided, toggle that category or specific validator
+	if len(args) > 0 {
+		arg := strings.ToLower(args[0])
+
+		// Check if it's a category
+		if cat, ok := categoryMap[arg]; ok {
+			// Toggle entire category
+			validators := GetValidatorsByCategory()[cat]
+			// Check if any are enabled
+			anyEnabled := false
+			for _, v := range validators {
+				if m.validatorConfig.IsEnabled(v.ID) {
+					anyEnabled = true
+					break
+				}
+			}
+
+			if anyEnabled {
+				m.validatorConfig.DisableCategory(cat)
+				m.addOutput(m.styles.Warning.Render(fmt.Sprintf("Disabled all %s validators", arg)))
+			} else {
+				m.validatorConfig.EnableCategory(cat)
+				m.addOutput(m.styles.Success.Render(fmt.Sprintf("Enabled all %s validators", arg)))
+			}
+			m.addOutput("")
+		} else {
+			// Try to find validator by ID
+			found := false
+			for _, v := range AllValidators() {
+				if strings.EqualFold(string(v.ID), arg) {
+					newState := m.validatorConfig.Toggle(v.ID)
+					if newState {
+						m.addOutput(m.styles.Success.Render(fmt.Sprintf("Enabled: %s", v.Name)))
+					} else {
+						m.addOutput(m.styles.Warning.Render(fmt.Sprintf("Disabled: %s", v.Name)))
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				m.addOutput(m.styles.Error.Render(fmt.Sprintf("Unknown validator or category: %s", arg)))
+			}
+			m.addOutput("")
+		}
+	}
+
+	// Show current configuration
+	m.addOutput(m.styles.Accent.Render("Validator Configuration"))
+	m.addOutput("")
+
+	byCategory := GetValidatorsByCategory()
+	categoryOrder := []ValidatorCategory{CategoryCore, CategoryGame, CategoryHFT, CategoryEmbedded, CategorySecurity, CategoryPerformance}
+	categoryNames := map[ValidatorCategory]string{
+		CategoryCore:        "Core (always run)",
+		CategoryGame:        "Game Development (/config game)",
+		CategoryHFT:         "HFT (/config hft)",
+		CategoryEmbedded:    "Embedded Systems (/config embedded)",
+		CategorySecurity:    "Security (/config security)",
+		CategoryPerformance: "Performance (/config perf)",
+	}
+
+	for _, cat := range categoryOrder {
+		validators := byCategory[cat]
+		if len(validators) == 0 {
+			continue
+		}
+
+		m.addOutput(m.styles.Info.Render(categoryNames[cat]))
+		for _, v := range validators {
+			status := "[ ]"
+			style := m.styles.Dim
+			if m.validatorConfig.IsEnabled(v.ID) {
+				status = "[✓]"
+				style = m.styles.Success
+			}
+			line := fmt.Sprintf("  %s %s - %s", status, v.Name, v.Description)
+			m.addOutput(style.Render(line))
+		}
+		m.addOutput("")
+	}
+
+	m.addOutput(m.styles.Dim.Render("Usage: /config <category|validator> to toggle"))
 }
