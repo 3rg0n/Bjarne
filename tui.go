@@ -119,6 +119,7 @@ type Model struct {
 	conversation   []Message
 	workspaceIndex *WorkspaceIndex // Indexed codebase for context
 	vectorIndex    *VectorIndex    // Semantic search index with embeddings
+	llmGuard       *LLMGuardClient // Optional LLM security scanner
 
 	// For async operations
 	ctx      context.Context
@@ -205,6 +206,7 @@ func NewModel(provider LLMProvider, container *ContainerRuntime, cfg *Config) Mo
 		config:       cfg,
 		tokenTracker: NewTokenTracker(cfg.MaxTotalTokens, cfg.WarnTokenThreshold),
 		conversation: []Message{},
+		llmGuard:     NewLLMGuardClient(),
 		ctx:          context.Background(),
 		width:        120, // Default, will be updated on WindowSizeMsg
 		height:       24,
@@ -471,6 +473,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
 		m.conversation = append(m.conversation, Message{Role: "assistant", Content: msg.result.Text})
 
+		// LLM Guard: Scan generated output for embedded secrets
+		if m.llmGuard != nil && m.llmGuard.IsEnabled() {
+			scanResult, err := m.llmGuard.ScanOutput(msg.result.Text)
+			if err != nil {
+				m.addOutput(m.styles.Warning.Render("Output security scan unavailable: ") + err.Error())
+			} else if !scanResult.IsValid {
+				m.addOutput("")
+				m.addOutput(m.styles.Warning.Render("Security scan detected issues in generated code:"))
+				m.addOutput(m.llmGuard.FormatSecurityIssues(scanResult))
+				m.addOutput(m.styles.Dim.Render("Proceeding with validation - review code carefully."))
+			}
+		}
+
 		// Extract files (supports both single and multi-file responses)
 		files := extractMultipleFiles(msg.result.Text)
 		if len(files) == 0 {
@@ -704,6 +719,24 @@ func (m *Model) startClassifying(prompt string) (Model, tea.Cmd) {
 	m.statusMsg = "Classifying complexity…"
 	m.startTime = time.Now()
 	m.tokenCount = 0
+
+	// LLM Guard: Scan prompt for security issues (prompt injection, secrets, toxicity)
+	if m.llmGuard != nil && m.llmGuard.IsEnabled() {
+		scanResult, err := m.llmGuard.ScanPrompt(prompt)
+		if err != nil {
+			m.addOutput("")
+			m.addOutput(m.styles.Warning.Render("Security scan unavailable: ") + err.Error())
+		} else if !scanResult.IsValid {
+			// Prompt failed security scan - reject it
+			m.addOutput("")
+			m.addOutput(m.styles.Error.Render("Security scan blocked this request:"))
+			m.addOutput(m.llmGuard.FormatSecurityIssues(scanResult))
+			m.addOutput("")
+			m.addOutput("Please rephrase your request without sensitive content.")
+			m.state = StateInput
+			return *m, nil
+		}
+	}
 
 	// Store original prompt and parse example tests
 	m.originalPrompt = prompt

@@ -147,6 +147,8 @@ Environment Variables:
   BJARNE_MAX_ITERATIONS   Max validation retry attempts (default: 3)
   BJARNE_MAX_TOKENS       Max tokens per response (default: 8192)
   BJARNE_MAX_TOTAL_TOKENS Session token budget (default: 150000, 0=unlimited)
+  LLMGUARD_URL            LLM Guard API URL for security scanning (optional)
+  LLMGUARD_TOKEN          LLM Guard API token for authentication (optional)
 
 Examples:
   # Interactive mode

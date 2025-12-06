@@ -131,15 +131,43 @@ RULES:
 6. Handle memory safely (RAII, smart pointers)
 7. If using threads, ensure proper synchronization
 
-BANNED C FUNCTIONS (use safe alternatives):
-- NEVER use gets() - use fgets() or std::getline()
-- NEVER use strcpy/strcat - use snprintf() or std::string
-- NEVER use sprintf/vsprintf - use snprintf()
-- NEVER use scanf("%s") without width - use fgets() + sscanf()
-- NEVER use strtok() - use strtok_r() or std::string methods
-- Prefer std::string, std::vector over raw char arrays
-- Prefer std::array over C arrays
-- Use std::string_view for non-owning string references
+BANNED UNSAFE FUNCTIONS (CWE-242, CWE-676):
+
+STRING FUNCTIONS (buffer overflow risk):
+- NEVER use gets() → use fgets(buf, size, stdin) or std::getline()
+- NEVER use strcpy()/strcat() → use std::string or snprintf()
+- NEVER use sprintf()/vsprintf() → use snprintf(buf, size, fmt, ...)
+- NEVER use scanf("%s") → use fgets() + sscanf() with width specifier
+- NEVER use strtok() → use strtok_r() or std::string methods
+
+FORMAT STRING (CWE-134):
+- NEVER use printf(user_data) → use printf("%s", user_data)
+- NEVER use fprintf(stream, user_data) → use fprintf(stream, "%s", user_data)
+- NEVER pass untrusted input directly to format strings
+
+I/O FUNCTIONS:
+- NEVER use tmpnam()/tempnam() → use mkstemp() or std::filesystem::temp_directory_path()
+
+MEMORY:
+- NEVER use alloca() → use std::vector or std::array
+- NEVER use raw new/delete → use std::unique_ptr, std::make_unique()
+- NEVER use malloc()/free() in C++ → use containers or smart pointers
+
+PROCESS (shell injection risk):
+- NEVER use system() with user input → use fork()/execvp() with explicit args
+- NEVER use popen() with user input → spawn process directly
+
+RANDOM:
+- NEVER use rand()/srand() → use std::random_device, std::mt19937
+
+SAFE ALTERNATIVES TO PREFER:
+- std::string over char arrays
+- std::vector over raw arrays
+- std::array over C arrays
+- std::string_view for non-owning string references
+- std::unique_ptr/std::shared_ptr for dynamic allocation
+- std::optional for nullable values
+- RAII for all resource management
 
 OUTPUT FORMAT:
 For simple tasks (single file):
@@ -188,7 +216,7 @@ VALIDATION GATES:
 Write code that passes ALL checks.`
 
 // IterationPromptTemplate is sent when validation fails
-// %s = errors, %s = current code
+// %s = current code, %s = errors
 const IterationPromptTemplate = `Validation failed. Fix the code.
 
 CURRENT CODE:
@@ -205,6 +233,17 @@ Common fixes by sanitizer:
 - UBSAN (undefined behavior): Avoid signed overflow, null deref, invalid shifts.
 - TSAN (data races): Use mutex/atomic for shared data between threads.
 - compile: Fix syntax errors, add missing includes, resolve type mismatches.
+- clang-tidy: Replace banned functions with safe alternatives (see below).
+
+SECURITY FUNCTION REPLACEMENTS:
+- gets() → fgets(buf, sizeof(buf), stdin)
+- strcpy()/strcat() → std::string or snprintf()
+- sprintf() → snprintf(buf, sizeof(buf), fmt, ...)
+- scanf("%%s") → fgets() + sscanf() with width
+- strtok() → std::string methods or strtok_r()
+- rand() → std::mt19937 + std::uniform_int_distribution
+- system()/popen() → avoid or use execvp() with explicit args
+- new/delete → std::unique_ptr/std::make_unique()
 
 IMPORTANT: If the original request conflicts with safe code (e.g., "return uninitialized value"),
 reinterpret it safely - return a default/sentinel value instead and document the change.
