@@ -207,9 +207,10 @@ func (c *ContainerRuntime) ValidateMultiFileCodeWithExamples(ctx context.Context
 
 	// Stage 3: Compile all source files together with hardening flags
 	// Security hardening: stack protector, FORTIFY_SOURCE, PIE, RELRO
+	// Note: -U_FORTIFY_SOURCE before -D to avoid macro redefinition error (container may have it set)
 	result = c.runValidationStage(ctx, tmpDir, "compile",
 		"sh", "-c",
-		"clang++ -std=c++17 -Wall -Wextra -Werror -fstack-protector-all -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro -Wl,-z,now -I/src -o /tmp/test "+srcArgs)
+		"clang++ -std=c++17 -Wall -Wextra -Werror -fstack-protector-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro -Wl,-z,now -I/src -o /tmp/test "+srcArgs)
 	results = append(results, result)
 	if !result.Success {
 		return results, nil
@@ -453,9 +454,10 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 
 	// Stage 5: Compile with strict warnings and hardening flags
 	// Security hardening: stack protector, FORTIFY_SOURCE, PIE, RELRO
+	// Note: -U_FORTIFY_SOURCE before -D to avoid macro redefinition error (container may have it set)
 	result = runStage("compile",
 		"clang++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
-		"-fstack-protector-all", "-D_FORTIFY_SOURCE=2",
+		"-fstack-protector-all", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=2",
 		"-fPIE", "-pie", "-Wl,-z,relro", "-Wl,-z,now",
 		"-o", "/tmp/test", "/src/"+filename)
 	results = append(results, result)
