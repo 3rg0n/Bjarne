@@ -127,12 +127,15 @@ If you want to build the validation container locally:
 ```bash
 cd docker
 
-# Build Ubuntu-based image (recommended)
-podman build -f Dockerfile.ubuntu -t bjarne-validator:local .
-
-# Or build Wolfi-based image (smaller, requires glibc compat)
-podman build -t bjarne-validator:local .
+# Build Wolfi-based image (multi-stage, secure, minimal)
+podman build -f Dockerfile -t bjarne-validator:local .
 ```
+
+The container uses [Wolfi](https://wolfi.dev/) (Chainguard) base image for:
+- Zero known CVEs
+- Minimal attack surface
+- SBOM included
+- glibc-based (required for sanitizers)
 
 Then set the environment variable:
 

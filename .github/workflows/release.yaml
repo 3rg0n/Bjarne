@@ -51,12 +51,17 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Build and push validator container
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push validator container (Wolfi)
         uses: docker/build-push-action@v6
         with:
           context: ./docker
-          file: ./docker/Dockerfile.ubuntu
+          file: ./docker/Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository_owner }}/bjarne-validator:${{ steps.version.outputs.VERSION }}
             ghcr.io/${{ github.repository_owner }}/bjarne-validator:latest
+            ghcr.io/${{ github.repository_owner }}/bjarne-validator:wolfi

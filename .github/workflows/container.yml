@@ -14,12 +14,11 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  # github.repository preserves case, but Docker requires lowercase
   IMAGE_NAME: 3rg0n/bjarne-validator
 
 jobs:
   build:
-    name: Build container
+    name: Build Wolfi container
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -50,21 +49,26 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=wolfi,enable={{is_default_branch}}
             type=sha,prefix=
             type=ref,event=branch
             type=ref,event=pr
 
-      - name: Build and push (Ubuntu)
+      - name: Build and push (Wolfi)
         uses: docker/build-push-action@v5
         with:
           context: ./docker
-          file: ./docker/Dockerfile.ubuntu
+          file: ./docker/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Wolfi supports both amd64 and arm64
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Multi-stage build caching
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
 
   test:
     name: Test container
@@ -80,6 +84,10 @@ jobs:
         run: |
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
+      - name: Test clang version
+        run: |
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest clang++ --version
+
       - name: Test clang-tidy
         run: |
           echo '#include <iostream>
@@ -90,18 +98,46 @@ jobs:
 
       - name: Test compilation
         run: |
-          docker run --rm -v /tmp:/src:ro \
+          docker run --rm -v /tmp:/src:ro --tmpfs /tmp:rw \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            clang++ -std=c++17 -Wall -Wextra -o /tmp/test /src/test.cpp
+            sh -c "clang++ -std=c++17 -Wall -Wextra -o /tmp/test /src/test.cpp && /tmp/test"
 
       - name: Test ASAN build
         run: |
           docker run --rm -v /tmp:/src:ro --tmpfs /tmp:rw \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            sh -c "clang++ -std=c++17 -fsanitize=address -o /tmp/test /src/test.cpp && /tmp/test"
+            sh -c "clang++ -std=c++17 -fsanitize=address -fno-omit-frame-pointer -o /tmp/test /src/test.cpp && /tmp/test"
 
       - name: Test UBSAN build
         run: |
           docker run --rm -v /tmp:/src:ro --tmpfs /tmp:rw \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            sh -c "clang++ -std=c++17 -fsanitize=undefined -o /tmp/test /src/test.cpp && /tmp/test"
+            sh -c "clang++ -std=c++17 -fsanitize=undefined -fno-omit-frame-pointer -o /tmp/test /src/test.cpp && /tmp/test"
+
+      - name: Test TSAN build
+        run: |
+          echo '#include <iostream>
+          #include <thread>
+          int main() {
+            std::thread t([]{ std::cout << "thread" << std::endl; });
+            t.join();
+            return 0;
+          }' > /tmp/tsan_test.cpp
+          docker run --rm -v /tmp:/src:ro --tmpfs /tmp:rw \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            sh -c "clang++ -std=c++17 -fsanitize=thread -fno-omit-frame-pointer -o /tmp/test /src/tsan_test.cpp && /tmp/test"
+
+      - name: Test lizard
+        run: |
+          docker run --rm -v /tmp:/src:ro \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            lizard /src/test.cpp
+
+      - name: Test MSan libc++ exists
+        run: |
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ls -la /opt/msan/lib/
+
+      - name: Show container size
+        run: |
+          docker images ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest --format "{{.Size}}"

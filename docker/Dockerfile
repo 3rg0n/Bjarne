@@ -1,15 +1,18 @@
-# bjarne-validator: Validation container for C/C++ code
+# bjarne-validator: Multi-stage Wolfi container for C/C++ validation
 #
 # Uses Wolfi (Chainguard) base image for:
 # - Minimal attack surface
-# - No CVEs
+# - Zero known CVEs
 # - SBOM included
-# - Designed for secure containerized workloads
+# - glibc-based (required for sanitizers)
+#
+# Multi-stage build:
+# - Stage 1 (builder): Build MSan-instrumented libc++
+# - Stage 2 (runtime): Minimal image with only runtime dependencies
 #
 # Contains:
 # - Clang 21 with full sanitizer support
 # - clang-tidy for static analysis
-# - cppcheck for deep static analysis
 # - lizard for complexity metrics
 # - AddressSanitizer (ASAN)
 # - UndefinedBehaviorSanitizer (UBSAN)
@@ -19,16 +22,12 @@
 # Build: podman build -f docker/Dockerfile -t bjarne-validator:wolfi ./docker/
 # Run:   podman run --rm -v $(pwd)/code:/src:ro bjarne-validator:wolfi clang++ --version
 
-# Wolfi base with glibc (required for sanitizers)
-FROM cgr.dev/chainguard/wolfi-base:latest
+# ============================================================
+# Stage 1: Builder - Build MSan-instrumented libc++
+# ============================================================
+FROM cgr.dev/chainguard/wolfi-base:latest AS builder
 
-LABEL org.opencontainers.image.title="bjarne-validator"
-LABEL org.opencontainers.image.description="C/C++ validation container with Clang 21 and sanitizers (Wolfi-based)"
-LABEL org.opencontainers.image.source="https://github.com/3rg0n/bjarne"
-
-# Install Clang 21 and required tools from Wolfi packages
-# Package names updated for current Wolfi repository
-# Note: Wolfi uses 'samurai' for ninja-compatible build system
+# Install build dependencies (includes python3 for CMake's LLVM build)
 RUN apk update && apk add --no-cache \
     clang-21 \
     clang-21-extras \
@@ -40,24 +39,10 @@ RUN apk update && apk add --no-cache \
     libcxxabi1-21 \
     glibc-dev \
     linux-headers \
-    make \
     cmake \
     samurai \
     git \
-    python-3.13 \
-    py3.13-pip \
-    || (apk update && apk add --no-cache \
-    clang-21 clang-21-extras lld-21 libLLVM-21 compiler-rt-21 \
-    libcxx1-21 libcxx1-21-dev libcxxabi1-21 glibc-dev linux-headers \
-    make cmake samurai git python-3.13 py3.13-pip)
-
-# Note: clang-21 package already creates /usr/bin/clang and /usr/bin/clang++ symlinks
-# We only need to create symlinks for tools not automatically linked
-RUN ln -sf /usr/lib/llvm-21/bin/lld /usr/bin/lld 2>/dev/null || true && \
-    ln -sf /usr/lib/llvm-21/bin/llvm-symbolizer /usr/bin/llvm-symbolizer 2>/dev/null || true
-
-# Install lizard for complexity metrics (cppcheck not available in Wolfi)
-RUN pip3 install --break-system-packages lizard
+    python-3.13
 
 # Build MSan-instrumented libc++ for MemorySanitizer support
 # MSan requires ALL code (including stdlib) to be instrumented
@@ -79,6 +64,41 @@ RUN git clone --depth 1 --branch main https://github.com/llvm/llvm-project.git /
     && cp -r /tmp/llvm/build/include /opt/msan/ \
     && cp -r /tmp/llvm/build/lib /opt/msan/ \
     && rm -rf /tmp/llvm
+
+# ============================================================
+# Stage 2: Runtime - Minimal image with runtime dependencies
+# ============================================================
+FROM cgr.dev/chainguard/wolfi-base:latest AS runtime
+
+LABEL org.opencontainers.image.title="bjarne-validator"
+LABEL org.opencontainers.image.description="C/C++ validation container with Clang 21 and sanitizers (Wolfi-based)"
+LABEL org.opencontainers.image.source="https://github.com/3rg0n/bjarne"
+
+# Install runtime dependencies only (no cmake, git, samurai needed)
+RUN apk update && apk add --no-cache \
+    clang-21 \
+    clang-21-extras \
+    lld-21 \
+    libLLVM-21 \
+    compiler-rt-21 \
+    libcxx1-21 \
+    libcxx1-21-dev \
+    libcxxabi1-21 \
+    glibc-dev \
+    linux-headers \
+    make \
+    python-3.13 \
+    py3.13-pip
+
+# Create symlinks for tools not automatically linked by the package
+RUN ln -sf /usr/lib/llvm-21/bin/lld /usr/bin/lld 2>/dev/null || true && \
+    ln -sf /usr/lib/llvm-21/bin/llvm-symbolizer /usr/bin/llvm-symbolizer 2>/dev/null || true
+
+# Install lizard for complexity metrics
+RUN pip3 install --break-system-packages --no-cache-dir lizard
+
+# Copy MSan-instrumented libc++ from builder stage
+COPY --from=builder /opt/msan /opt/msan
 
 # Set environment variables for sanitizers
 ENV ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer
