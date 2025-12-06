@@ -460,7 +460,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
 		m.conversation = append(m.conversation, Message{Role: "assistant", Content: msg.result.Text})
 
-		// Show acknowledgment
+		// Check if acknowledgment already contains code (LLM jumped ahead)
+		code := extractCode(msg.result.Text)
+		if code != "" {
+			// LLM already generated code - use it directly, skip generation phase
+			m.addOutput("")
+			m.addOutput(m.styles.Info.Render("bjarne: ") + stripMarkdown(msg.result.Text))
+
+			// Extract files and go straight to validation
+			files := extractMultipleFiles(msg.result.Text)
+			if len(files) == 0 {
+				// Single file fallback
+				files = []CodeFile{{Filename: "code.cpp", Content: code}}
+			}
+			m.currentFiles = files
+			m.currentCode = code
+			return m.startValidation()
+		}
+
+		// Show acknowledgment (no code - need to generate)
 		m.addOutput("")
 		m.addOutput(m.styles.Info.Render("bjarne: ") + stripMarkdown(msg.result.Text))
 
