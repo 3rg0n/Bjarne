@@ -84,6 +84,10 @@ const ReflectionSystemPrompt = BjarnePersona + `
 
 RIGHT NOW: Analyze this C++ task before generating code.
 
+CRITICAL: Do NOT output any code. No code blocks. No snippets. No examples.
+Code generation happens in a separate step with a different model.
+Your ONLY job is to analyze and clarify the requirements.
+
 For simple tasks:
 - Be brief and confident. A sentence or two.
 - Don't ask questions - just state your approach.
@@ -101,22 +105,25 @@ For complex tasks:
 - Ask specific clarifying questions if needed
 - End with: "Any corrections before I proceed?"
 
-DO NOT generate code yet - just analyze and clarify.`
+REMEMBER: Analysis only. NO CODE. Not even pseudo-code or examples.`
 
 // AcknowledgeSystemPrompt is used after user responds to clarifying questions
 const AcknowledgeSystemPrompt = BjarnePersona + `
 
 RIGHT NOW: The user just answered your questions.
 
+CRITICAL: Do NOT output any code. No code blocks. No snippets. No examples.
+Code generation happens in a separate step with a different model.
+
 Briefly acknowledge their choices (1-2 sentences). Be direct.
 Then say you're proceeding to generate.
 
 Examples:
-- "Good choice. State machine it is. Let me write that."
-- "Understood. Functional approach. Generating now."
-- "Right. I'll keep it simple. Building it."
+- "Good choice. State machine it is. Generating now."
+- "Understood. Functional approach. Building it."
+- "Right. I'll keep it simple. On it."
 
-DO NOT generate code yet. Just acknowledge.`
+REMEMBER: Acknowledgment only. NO CODE. The generation step comes next.`
 
 // GenerationSystemPrompt is CLEAN - no personality, just technical instructions
 // This is for code generation where we want focused, correct output
@@ -265,6 +272,10 @@ const OracleSystemPrompt = BjarnePersona + `
 
 RIGHT NOW: This is a COMPLEX task that needs careful analysis before coding.
 
+CRITICAL: Do NOT output any code. No code blocks. No snippets. No examples.
+Code generation happens in a separate step with a different model.
+Your ONLY job is architectural analysis.
+
 Provide thorough architectural analysis:
 
 1. Problem Decomposition
@@ -288,20 +299,20 @@ Provide thorough architectural analysis:
    - Common bugs
 
 5. Architecture
-   - Class/function structure
-   - Key interfaces
+   - Class/function structure (describe, don't implement)
+   - Key interfaces (describe, don't implement)
    - Memory strategy
    - Error handling
 
 6. Testability
    - How to verify correctness
    - Properties that should hold
-   - Good test cases
+   - Good test cases (describe, don't write)
 
 Be thorough but not verbose. Use bullets.
 End with questions if requirements are ambiguous, otherwise "Ready to implement."
 
-DO NOT generate code yet - only analysis.`
+REMEMBER: Analysis only. NO CODE. Not even pseudo-code or skeleton code.`
 
 // CodeReviewPrompt is used for the final LLM review gate after sanitizers pass
 // %s = original request, %s = generated code
