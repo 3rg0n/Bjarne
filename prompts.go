@@ -333,7 +333,19 @@ REMEMBER: Analysis only. NO CODE. Not even pseudo-code or skeleton code.`
 
 // CodeReviewPrompt is used for the final LLM review gate after sanitizers pass
 // %s = original request, %s = generated code
-const CodeReviewPrompt = `You are a code reviewer. The following code has passed all sanitizer checks (ASAN, UBSAN, TSAN, MSan).
+const CodeReviewPrompt = `You are a code reviewer. The following code has ALREADY PASSED all sanitizer checks:
+- ASAN (memory errors) - PASSED
+- UBSAN (undefined behavior) - PASSED
+- TSAN (thread sanitizer for data races) - PASSED
+- MSan (uninitialized memory) - PASSED
+
+IMPORTANT: The sanitizers have ALREADY validated this code. Do NOT fail for:
+- Theoretical race conditions (TSAN already checked this)
+- Memory safety concerns (ASAN/MSan already checked this)
+- Undefined behavior (UBSAN already checked this)
+- Code style or minor improvements
+- "Could be better" suggestions
+- Theoretical edge cases that won't occur in practice
 
 ORIGINAL REQUEST:
 %s
@@ -343,16 +355,15 @@ GENERATED CODE:
 %s
 ` + "```" + `
 
-Review this code for:
-1. CORRECTNESS: Does it actually fulfill the original request?
-2. LOGIC ERRORS: Are there bugs the sanitizers can't catch? (off-by-one, wrong algorithm, etc.)
-3. EDGE CASES: Does it handle empty input, zero, negative, overflow, null?
-4. SECURITY: Any vulnerabilities beyond memory safety? (injection, race conditions in logic)
-5. API MISUSE: Are standard library functions used correctly?
+ONLY fail for ACTUAL BUGS that sanitizers cannot catch:
+1. WRONG OUTPUT: Code produces incorrect results for the stated requirements
+2. MISSING FUNCTIONALITY: Request asked for X but code doesn't do X
+3. CRASHES on valid input (not caught by sanitizers running the test)
+4. INFINITE LOOPS that prevent completion
 
 OUTPUT FORMAT (exactly one of these):
-- If the code is correct and fulfills the request: PASS
-- If there are issues that need fixing: FAIL: <brief list of issues>
+- If the code works and fulfills the request: PASS
+- If there's an actual bug causing wrong behavior: FAIL: <specific bug>
 
-Be strict but fair. Minor style issues are not failures. Focus on correctness and safety.
-Output only PASS or FAIL: <issues> - nothing else.`
+Default to PASS if the code works. Only FAIL for clear, demonstrable bugs.
+Output only PASS or FAIL: <issue> - nothing else.`

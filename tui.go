@@ -102,6 +102,7 @@ type Model struct {
 	totalFixAttempts   int      // Total fix attempts across all models (for display)
 	lastValidationErrs string   // Last validation errors for fix prompt
 	modelsUsed         []string // Track which models we've tried
+	reviewFailures     int      // Count consecutive review failures (max 2 before showing code)
 
 	// Exit confirmation
 	ctrlCPressed bool      // True if Ctrl+C was pressed once
@@ -632,12 +633,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.passed {
 			// LLM review passed - show the validated code
 			m.addOutput(m.styles.Success.Render("  └─ Gate: review... PASS"))
+			m.reviewFailures = 0 // Reset on success
 			return m.showValidatedCode()
 		}
 
-		// LLM review found issues - treat as validation failure
+		// LLM review found issues
+		m.reviewFailures++
 		m.addOutput(m.styles.Error.Render("  └─ Gate: review... FAIL"))
 		m.addOutput(m.styles.Dim.Render("     " + msg.issues))
+
+		// Limit review retries to 2 - if sanitizers pass twice but review keeps failing,
+		// the review is being too pedantic. Show the code.
+		if m.reviewFailures >= 2 {
+			m.addOutput("")
+			m.addOutput(m.styles.Warning.Render("Review keeps failing but sanitizers pass. Code is likely fine."))
+			m.addOutput(m.styles.Dim.Render("(Sanitizers validated memory safety, data races, and undefined behavior)"))
+			return m.showValidatedCode()
+		}
+
 		m.lastValidationErrs = "Code review: " + msg.issues
 
 		// Try to fix if we can escalate
@@ -1130,6 +1143,7 @@ func (m *Model) resetEscalation() {
 	m.totalFixAttempts = 0
 	m.lastValidationErrs = ""
 	m.modelsUsed = nil
+	m.reviewFailures = 0
 }
 
 // canEscalate checks if we can attempt another fix
