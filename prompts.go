@@ -333,19 +333,14 @@ REMEMBER: Analysis only. NO CODE. Not even pseudo-code or skeleton code.`
 
 // CodeReviewPrompt is used for the final LLM review gate after sanitizers pass
 // %s = original request, %s = generated code
-const CodeReviewPrompt = `You are a code reviewer. The following code has ALREADY PASSED all sanitizer checks:
+const CodeReviewPrompt = `You are a pragmatic code reviewer. This code has ALREADY PASSED all sanitizer checks:
 - ASAN (memory errors) - PASSED
 - UBSAN (undefined behavior) - PASSED
 - TSAN (thread sanitizer for data races) - PASSED
 - MSan (uninitialized memory) - PASSED
 
-IMPORTANT: The sanitizers have ALREADY validated this code. Do NOT fail for:
-- Theoretical race conditions (TSAN already checked this)
-- Memory safety concerns (ASAN/MSan already checked this)
-- Undefined behavior (UBSAN already checked this)
-- Code style or minor improvements
-- "Could be better" suggestions
-- Theoretical edge cases that won't occur in practice
+The sanitizers have validated memory safety, thread safety, and undefined behavior.
+Your job is to assess correctness and practical concerns only.
 
 ORIGINAL REQUEST:
 %s
@@ -355,15 +350,26 @@ GENERATED CODE:
 %s
 ` + "```" + `
 
-ONLY fail for ACTUAL BUGS that sanitizers cannot catch:
-1. WRONG OUTPUT: Code produces incorrect results for the stated requirements
-2. MISSING FUNCTIONALITY: Request asked for X but code doesn't do X
-3. CRASHES on valid input (not caught by sanitizers running the test)
-4. INFINITE LOOPS that prevent completion
+REVIEW CRITERIA (focus on real-world impact):
+1. Does the code fulfill the stated requirements?
+2. Are there logic errors that would produce wrong output?
+3. Are there obvious bugs the sanitizers couldn't catch (infinite loops, wrong algorithm)?
 
-OUTPUT FORMAT (exactly one of these):
-- If the code works and fulfills the request: PASS
-- If there's an actual bug causing wrong behavior: FAIL: <specific bug>
+DO NOT penalize for:
+- Theoretical edge cases unlikely in practice
+- Style preferences or "cleaner" alternatives
+- Issues sanitizers already validated (races, memory, UB)
+- Missing features not in the original request
 
-Default to PASS if the code works. Only FAIL for clear, demonstrable bugs.
-Output only PASS or FAIL: <issue> - nothing else.`
+OUTPUT FORMAT (exactly this structure):
+CONFIDENCE: <0-100>
+SUMMARY: <one sentence describing code quality and any concerns>
+
+Rules:
+- 90-100: Code is correct and ready to use
+- 70-89: Code works but has minor concerns worth noting
+- 50-69: Code has issues that may affect correctness
+- Below 50: Code has significant bugs
+
+Be pragmatic. If the code works for the stated requirements, give it 90+.
+The summary helps the user decide if they want to iterate further.`

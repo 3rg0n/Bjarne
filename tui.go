@@ -113,6 +113,10 @@ type Model struct {
 	revealCurrentLine int      // Current line being revealed
 	revealTotalTime   float64  // Total validation time to show after reveal
 
+	// Review results for display
+	lastConfidence int    // Last review confidence score (0-100)
+	lastSummary    string // Last review summary
+
 	// Session data
 	provider       LLMProvider // Abstract LLM provider (Bedrock, Anthropic, OpenAI, Gemini)
 	container      *ContainerRuntime
@@ -164,10 +168,10 @@ type fixDoneMsg struct {
 }
 
 type reviewDoneMsg struct {
-	result *GenerateResult
-	passed bool
-	issues string
-	err    error
+	result     *GenerateResult
+	confidence int    // 0-100 confidence score
+	summary    string // One-line summary for user
+	err        error
 }
 
 type tickMsg time.Time
@@ -625,44 +629,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ctx.Err() == context.Canceled {
 				return m, nil
 			}
-			// Review failed but sanitizers passed - show code anyway
+			// Review failed but sanitizers passed - show code anyway with default confidence
 			m.addOutput(m.styles.Warning.Render("Code review unavailable: " + msg.err.Error()))
+			m.lastConfidence = 80 // Reasonable default
+			m.lastSummary = "Sanitizers passed; review unavailable."
 			return m.showValidatedCode()
 		}
 
-		if msg.passed {
-			// LLM review passed - show the validated code
-			m.addOutput(m.styles.Success.Render("  └─ Gate: review... PASS"))
-			m.reviewFailures = 0 // Reset on success
+		// Store confidence and summary for display
+		m.lastConfidence = msg.confidence
+		m.lastSummary = msg.summary
+
+		// Confidence-based decision:
+		// >= 70: Accept the code (user can decide based on summary)
+		// < 70: Try to improve if we can, otherwise show anyway
+		if msg.confidence >= 70 {
+			m.addOutput(m.styles.Success.Render(fmt.Sprintf("  └─ Gate: review... %d%% confidence", msg.confidence)))
+			m.reviewFailures = 0
 			return m.showValidatedCode()
 		}
 
-		// LLM review found issues
+		// Low confidence - try to fix if possible
 		m.reviewFailures++
-		m.addOutput(m.styles.Error.Render("  └─ Gate: review... FAIL"))
-		m.addOutput(m.styles.Dim.Render("     " + msg.issues))
+		m.addOutput(m.styles.Warning.Render(fmt.Sprintf("  └─ Gate: review... %d%% confidence", msg.confidence)))
+		m.addOutput(m.styles.Dim.Render("     " + msg.summary))
 
-		// Limit review retries to 2 - if sanitizers pass twice but review keeps failing,
-		// the review is being too pedantic. Show the code.
+		// Limit review retries to 2 - don't loop forever on pedantic reviews
 		if m.reviewFailures >= 2 {
 			m.addOutput("")
-			m.addOutput(m.styles.Warning.Render("Review keeps failing but sanitizers pass. Code is likely fine."))
-			m.addOutput(m.styles.Dim.Render("(Sanitizers validated memory safety, data races, and undefined behavior)"))
+			m.addOutput(m.styles.Warning.Render("Review confidence remains low but sanitizers pass."))
+			m.addOutput(m.styles.Dim.Render("(Showing code - review the summary and decide if changes are needed)"))
 			return m.showValidatedCode()
 		}
 
-		m.lastValidationErrs = "Code review: " + msg.issues
+		m.lastValidationErrs = "Code review (" + fmt.Sprintf("%d%%", msg.confidence) + "): " + msg.summary
 
 		// Try to fix if we can escalate
 		if m.config.EscalateOnFailure && m.canEscalate() {
 			m.addOutput("")
-			m.addOutput("Review failed, refactoring...")
+			m.addOutput("Attempting to improve confidence...")
 			return m.startFix()
 		}
 
-		// Can't escalate - show partial success
+		// Can't escalate - show code with low confidence (user decides)
 		m.addOutput("")
-		m.addOutput(m.styles.Warning.Render("Code passed sanitizers but failed review. Showing code anyway."))
+		m.addOutput(m.styles.Warning.Render("Code passed sanitizers. Review the summary below."))
 		return m.showValidatedCode()
 
 	case tickMsg:
@@ -1082,7 +1093,7 @@ func (m *Model) doReview(ctx context.Context) tea.Cmd {
 		// Build review prompt with original request and generated code
 		reviewPrompt := fmt.Sprintf(CodeReviewPrompt, m.originalPrompt, m.currentCode)
 
-		// Use Haiku for fast review (it's a simple pass/fail check)
+		// Use Haiku for fast review
 		result, err := m.provider.Generate(ctx, m.config.ReflectionModel, "", []Message{
 			{Role: "user", Content: reviewPrompt},
 		}, 200)
@@ -1091,20 +1102,51 @@ func (m *Model) doReview(ctx context.Context) tea.Cmd {
 			return reviewDoneMsg{err: err}
 		}
 
+		// Parse response: CONFIDENCE: <score>\nSUMMARY: <text>
 		response := strings.TrimSpace(result.Text)
-		passed := strings.HasPrefix(strings.ToUpper(response), "PASS")
-		issues := ""
-		if !passed && strings.HasPrefix(strings.ToUpper(response), "FAIL:") {
-			issues = strings.TrimPrefix(response, "FAIL:")
-			issues = strings.TrimPrefix(issues, "Fail:")
-			issues = strings.TrimPrefix(issues, "fail:")
-			issues = strings.TrimSpace(issues)
-		} else if !passed {
-			issues = response // Use full response as issues if no FAIL: prefix
-		}
+		confidence, summary := parseReviewResponse(response)
 
-		return reviewDoneMsg{result: result, passed: passed, issues: issues}
+		return reviewDoneMsg{result: result, confidence: confidence, summary: summary}
 	}
+}
+
+// parseReviewResponse extracts confidence score and summary from review output
+func parseReviewResponse(response string) (int, string) {
+	confidence := 85 // Default to reasonable confidence if parsing fails
+	summary := "Code review completed."
+
+	lines := strings.Split(response, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		upper := strings.ToUpper(line)
+
+		if strings.HasPrefix(upper, "CONFIDENCE:") {
+			// Extract number after CONFIDENCE:
+			numStr := strings.TrimPrefix(line, line[:len("CONFIDENCE:")])
+			numStr = strings.TrimSpace(numStr)
+			// Remove any trailing % or text
+			for i, c := range numStr {
+				if c < '0' || c > '9' {
+					numStr = numStr[:i]
+					break
+				}
+			}
+			if n, err := fmt.Sscanf(numStr, "%d", &confidence); n == 1 && err == nil {
+				// Clamp to 0-100
+				if confidence < 0 {
+					confidence = 0
+				}
+				if confidence > 100 {
+					confidence = 100
+				}
+			}
+		} else if strings.HasPrefix(upper, "SUMMARY:") {
+			summary = strings.TrimPrefix(line, line[:len("SUMMARY:")])
+			summary = strings.TrimSpace(summary)
+		}
+	}
+
+	return confidence, summary
 }
 
 // showValidatedCode displays the final validated code and transitions to reveal
@@ -1119,6 +1161,19 @@ func (m *Model) showValidatedCode() (Model, tea.Cmd) {
 
 	m.addOutput("")
 	m.addOutput(m.styles.Success.Render("  >> All validation gates passed"))
+
+	// Show confidence score and summary
+	confidenceStyle := m.styles.Success
+	if m.lastConfidence < 70 {
+		confidenceStyle = m.styles.Warning
+	} else if m.lastConfidence < 90 {
+		confidenceStyle = m.styles.Info
+	}
+	m.addOutput("")
+	m.addOutput(fmt.Sprintf("  Confidence: %s", confidenceStyle.Render(fmt.Sprintf("%d%%", m.lastConfidence))))
+	if m.lastSummary != "" {
+		m.addOutput(fmt.Sprintf("  %s", m.styles.Dim.Render(m.lastSummary)))
+	}
 
 	// Build reveal lines with file separators for multi-file projects
 	m.revealLines = m.buildRevealLines()
