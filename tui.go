@@ -464,8 +464,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		code := extractCode(msg.result.Text)
 		if code != "" {
 			// LLM already generated code - use it directly, skip generation phase
+			// Don't show the text (contains code) - go straight to validation
 			m.addOutput("")
-			m.addOutput(m.styles.Info.Render("bjarne: ") + stripMarkdown(msg.result.Text))
+			m.addOutput(m.styles.Info.Render("Code received, validating..."))
 
 			// Extract files and go straight to validation
 			files := extractMultipleFiles(msg.result.Text)

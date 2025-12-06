@@ -251,9 +251,10 @@ func saveToFile(filename, code string) error {
 
 // stripMarkdown removes common markdown formatting from text for terminal display
 func stripMarkdown(text string) string {
-	// Remove code blocks entirely (```...```)
-	re := regexp.MustCompile("(?s)```[a-z]*\\s*\n.*?```")
-	text = re.ReplaceAllString(text, "")
+	// Remove code blocks entirely (```...```) - handles various formats:
+	// ```cpp\ncode```, ```\ncode```, ```cpp code```, etc.
+	re := regexp.MustCompile("(?s)```[a-zA-Z]*\\s*.*?```")
+	text = re.ReplaceAllString(text, "[code block removed]")
 
 	// Remove headers (# ## ### etc) - keep the text
 	re = regexp.MustCompile(`(?m)^#{1,6}\s+`)
