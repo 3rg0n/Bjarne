@@ -46,6 +46,7 @@ RUN apk update && apk add --no-cache \
 
 # Build MSan-instrumented libc++ for MemorySanitizer support
 # MSan requires ALL code (including stdlib) to be instrumented
+# We build SHARED libraries to avoid complex static linking issues
 RUN git clone --depth 1 --branch main https://github.com/llvm/llvm-project.git /tmp/llvm \
     && cmake -G Ninja -S /tmp/llvm/runtimes -B /tmp/llvm/build \
         -DCMAKE_C_COMPILER=/usr/bin/clang \
@@ -53,16 +54,23 @@ RUN git clone --depth 1 --branch main https://github.com/llvm/llvm-project.git /
         -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" \
         -DLLVM_USE_SANITIZER=MemoryWithOrigins \
         -DCMAKE_BUILD_TYPE=Release \
-        -DLIBCXX_ENABLE_SHARED=OFF \
-        -DLIBCXXABI_ENABLE_SHARED=OFF \
+        -DLIBCXX_ENABLE_SHARED=ON \
+        -DLIBCXX_ENABLE_STATIC=OFF \
+        -DLIBCXXABI_ENABLE_SHARED=ON \
+        -DLIBCXXABI_ENABLE_STATIC=OFF \
+        -DLIBUNWIND_ENABLE_SHARED=ON \
+        -DLIBUNWIND_ENABLE_STATIC=OFF \
+        -DLIBCXX_USE_COMPILER_RT=ON \
+        -DLIBCXXABI_USE_COMPILER_RT=ON \
+        -DLIBCXXABI_USE_LLVM_UNWINDER=ON \
+        -DLIBCXX_CXX_ABI=libcxxabi \
         -DLIBCXX_INCLUDE_TESTS=OFF \
         -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
         -DLIBCXXABI_INCLUDE_TESTS=OFF \
         -DLIBUNWIND_INCLUDE_TESTS=OFF \
-    && ninja -C /tmp/llvm/build cxx cxxabi \
-    && mkdir -p /opt/msan \
-    && cp -r /tmp/llvm/build/include /opt/msan/ \
-    && cp -r /tmp/llvm/build/lib /opt/msan/ \
+        -DCMAKE_INSTALL_PREFIX=/opt/msan \
+    && ninja -C /tmp/llvm/build cxx cxxabi unwind \
+    && ninja -C /tmp/llvm/build install \
     && rm -rf /tmp/llvm
 
 # ============================================================

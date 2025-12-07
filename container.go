@@ -238,11 +238,12 @@ func (c *ContainerRuntime) ValidateMultiFileCodeWithExamples(ctx context.Context
 	// Note: MSan is optional - if the instrumented libc++ isn't working, we skip it
 	result = c.runValidationStage(ctx, tmpDir, "msan",
 		"sh", "-c",
-		"if [ -d /opt/msan/lib ] && [ -f /opt/msan/lib/libc++.a ]; then "+
+		"if [ -d /opt/msan/lib ] && ([ -f /opt/msan/lib/libc++.so ] || [ -f /opt/msan/lib/libc++.a ]); then "+
 			"clang++ -std=c++17 -fsanitize=memory -fsanitize-memory-track-origins "+
 			"-fno-omit-frame-pointer -g -stdlib=libc++ "+
 			"-nostdinc++ -isystem /opt/msan/include/c++/v1 "+
 			"-L/opt/msan/lib -Wl,-rpath,/opt/msan/lib "+
+			"-lc++ -lc++abi "+
 			"-I/src -o /tmp/test "+srcArgs+" 2>&1 || echo 'MSAN_SKIP: MSan libc++ linkage failed'; "+
 			"else echo 'MSAN_SKIP: MSan libc++ not available'; fi && "+
 			"[ -f /tmp/test ] && /tmp/test || true")
@@ -498,11 +499,12 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 	// Note: MSan is optional - if the instrumented libc++ isn't working, we skip it
 	result = runStage("msan",
 		"sh", "-c",
-		"if [ -d /opt/msan/lib ] && [ -f /opt/msan/lib/libc++.a ]; then "+
+		"if [ -d /opt/msan/lib ] && ([ -f /opt/msan/lib/libc++.so ] || [ -f /opt/msan/lib/libc++.a ]); then "+
 			"clang++ -std=c++17 -fsanitize=memory -fsanitize-memory-track-origins "+
 			"-fno-omit-frame-pointer -g -stdlib=libc++ "+
 			"-nostdinc++ -isystem /opt/msan/include/c++/v1 "+
 			"-L/opt/msan/lib -Wl,-rpath,/opt/msan/lib "+
+			"-lc++ -lc++abi "+
 			"-o /tmp/test /src/"+filename+" 2>&1 || echo 'MSAN_SKIP: MSan libc++ linkage failed'; "+
 			"else echo 'MSAN_SKIP: MSan libc++ not available'; fi && "+
 			"[ -f /tmp/test ] && /tmp/test || true")
