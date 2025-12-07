@@ -44,7 +44,7 @@ int main() {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Write code to temp file
 	codePath := filepath.Join(tmpDir, "insecure.cpp")
@@ -97,7 +97,7 @@ int main() {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	codePath := filepath.Join(tmpDir, "small.cpp")
 	if err := os.WriteFile(codePath, []byte(smallCode), 0600); err != nil {
@@ -148,7 +148,7 @@ int main() {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	codePath := filepath.Join(tmpDir, "cache.cpp")
 	if err := os.WriteFile(codePath, []byte(cacheUnfriendlyCode), 0600); err != nil {
@@ -192,7 +192,7 @@ int main() {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	codePath := filepath.Join(tmpDir, "test.cpp")
 	if err := os.WriteFile(codePath, []byte(code), 0600); err != nil {

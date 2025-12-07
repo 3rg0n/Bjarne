@@ -234,24 +234,14 @@ func (c *ContainerRuntime) ValidateMultiFileCodeWithExamples(ctx context.Context
 		return results, nil
 	}
 
-	// Stage 6: MSan
-	// Note: MSan is optional - if the instrumented libc++ isn't working, we skip it
+	// Stage 6: MSan (MemorySanitizer) - detects uninitialized memory reads
+	// Note: MSan works best for heap allocations. See single-file validation for details.
 	result = c.runValidationStage(ctx, tmpDir, "msan",
 		"sh", "-c",
-		"if [ -d /opt/msan/lib ] && ([ -f /opt/msan/lib/libc++.so ] || [ -f /opt/msan/lib/libc++.a ]); then "+
-			"clang++ -std=c++17 -fsanitize=memory -fsanitize-memory-track-origins "+
-			"-fno-omit-frame-pointer -g -stdlib=libc++ "+
-			"-nostdinc++ -isystem /opt/msan/include/c++/v1 "+
-			"-L/opt/msan/lib -Wl,-rpath,/opt/msan/lib "+
-			"-lc++ -lc++abi "+
-			"-I/src -o /tmp/test "+srcArgs+" 2>&1 || echo 'MSAN_SKIP: MSan libc++ linkage failed'; "+
-			"else echo 'MSAN_SKIP: MSan libc++ not available'; fi && "+
-			"[ -f /tmp/test ] && /tmp/test || true")
-	// MSan is advisory when libc++ linkage fails - it's a complex setup
-	if strings.Contains(result.Output, "MSAN_SKIP") {
-		result.Success = true
-		result.Output = "MSan skipped: " + result.Output
-	}
+		"clang++ -std=c++17 -fsanitize=memory -fsanitize-memory-track-origins "+
+			"-fno-omit-frame-pointer -g -O1 "+
+			"-I/src -o /tmp/test "+srcArgs+" 2>&1 && "+
+			"MSAN_OPTIONS=halt_on_error=1 /tmp/test 2>&1")
 	results = append(results, result)
 	if !result.Success {
 		return results, nil
@@ -494,25 +484,15 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 	}
 
 	// Stage 8: MSan (MemorySanitizer) - detects uninitialized memory reads
-	// MSan requires ALL code (including stdlib) to be instrumented
-	// We use custom-built MSan-instrumented libc++ from /opt/msan
-	// Note: MSan is optional - if the instrumented libc++ isn't working, we skip it
+	// Note: MSan works best for heap allocations (malloc/new). For full stack variable
+	// detection, a fully instrumented libc++ is needed, but that causes stack unwinding
+	// issues. This simpler approach catches the most common uninitialized memory bugs.
 	result = runStage("msan",
 		"sh", "-c",
-		"if [ -d /opt/msan/lib ] && ([ -f /opt/msan/lib/libc++.so ] || [ -f /opt/msan/lib/libc++.a ]); then "+
-			"clang++ -std=c++17 -fsanitize=memory -fsanitize-memory-track-origins "+
-			"-fno-omit-frame-pointer -g -stdlib=libc++ "+
-			"-nostdinc++ -isystem /opt/msan/include/c++/v1 "+
-			"-L/opt/msan/lib -Wl,-rpath,/opt/msan/lib "+
-			"-lc++ -lc++abi "+
-			"-o /tmp/test /src/"+filename+" 2>&1 || echo 'MSAN_SKIP: MSan libc++ linkage failed'; "+
-			"else echo 'MSAN_SKIP: MSan libc++ not available'; fi && "+
-			"[ -f /tmp/test ] && /tmp/test || true")
-	// MSan is advisory when libc++ linkage fails - it's a complex setup
-	if strings.Contains(result.Output, "MSAN_SKIP") {
-		result.Success = true
-		result.Output = "MSan skipped: " + result.Output
-	}
+		"clang++ -std=c++17 -fsanitize=memory -fsanitize-memory-track-origins "+
+			"-fno-omit-frame-pointer -g -O1 "+
+			"-o /tmp/test /src/"+filename+" 2>&1 && "+
+			"MSAN_OPTIONS=halt_on_error=1 /tmp/test 2>&1")
 	results = append(results, result)
 	if !result.Success {
 		return results, nil

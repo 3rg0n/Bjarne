@@ -1,14 +1,10 @@
-# bjarne-validator: Multi-stage Wolfi container for C/C++ validation
+# bjarne-validator: Wolfi container for C/C++ validation
 #
 # Uses Wolfi (Chainguard) base image for:
 # - Minimal attack surface
 # - Zero known CVEs
 # - SBOM included
 # - glibc-based (required for sanitizers)
-#
-# Multi-stage build:
-# - Stage 1 (builder): Build MSan-instrumented libc++
-# - Stage 2 (runtime): Minimal image with only runtime dependencies
 #
 # Contains:
 # - Clang 21 with full sanitizer support
@@ -17,72 +13,18 @@
 # - AddressSanitizer (ASAN)
 # - UndefinedBehaviorSanitizer (UBSAN)
 # - ThreadSanitizer (TSAN)
-# - MemorySanitizer (MSan) with custom libc++
+# - MemorySanitizer (MSan) - detects uninitialized heap memory
 #
 # Build: podman build -f docker/Dockerfile -t bjarne-validator:wolfi ./docker/
 # Run:   podman run --rm -v $(pwd)/code:/src:ro bjarne-validator:wolfi clang++ --version
 
-# ============================================================
-# Stage 1: Builder - Build MSan-instrumented libc++
-# ============================================================
-FROM cgr.dev/chainguard/wolfi-base:latest AS builder
-
-# Install build dependencies (includes python3 for CMake's LLVM build)
-RUN apk update && apk add --no-cache \
-    clang-21 \
-    clang-21-extras \
-    lld-21 \
-    libLLVM-21 \
-    compiler-rt-21 \
-    libcxx1-21 \
-    libcxx1-21-dev \
-    libcxxabi1-21 \
-    glibc-dev \
-    linux-headers \
-    cmake \
-    samurai \
-    git \
-    python-3.13
-
-# Build MSan-instrumented libc++ for MemorySanitizer support
-# MSan requires ALL code (including stdlib) to be instrumented
-# We build SHARED libraries to avoid complex static linking issues
-RUN git clone --depth 1 --branch main https://github.com/llvm/llvm-project.git /tmp/llvm \
-    && cmake -G Ninja -S /tmp/llvm/runtimes -B /tmp/llvm/build \
-        -DCMAKE_C_COMPILER=/usr/bin/clang \
-        -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
-        -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" \
-        -DLLVM_USE_SANITIZER=MemoryWithOrigins \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DLIBCXX_ENABLE_SHARED=ON \
-        -DLIBCXX_ENABLE_STATIC=OFF \
-        -DLIBCXXABI_ENABLE_SHARED=ON \
-        -DLIBCXXABI_ENABLE_STATIC=OFF \
-        -DLIBUNWIND_ENABLE_SHARED=ON \
-        -DLIBUNWIND_ENABLE_STATIC=OFF \
-        -DLIBCXX_USE_COMPILER_RT=ON \
-        -DLIBCXXABI_USE_COMPILER_RT=ON \
-        -DLIBCXXABI_USE_LLVM_UNWINDER=ON \
-        -DLIBCXX_CXX_ABI=libcxxabi \
-        -DLIBCXX_INCLUDE_TESTS=OFF \
-        -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
-        -DLIBCXXABI_INCLUDE_TESTS=OFF \
-        -DLIBUNWIND_INCLUDE_TESTS=OFF \
-        -DCMAKE_INSTALL_PREFIX=/opt/msan \
-    && ninja -C /tmp/llvm/build cxx cxxabi unwind \
-    && ninja -C /tmp/llvm/build install \
-    && rm -rf /tmp/llvm
-
-# ============================================================
-# Stage 2: Runtime - Minimal image with runtime dependencies
-# ============================================================
-FROM cgr.dev/chainguard/wolfi-base:latest AS runtime
+FROM cgr.dev/chainguard/wolfi-base:latest
 
 LABEL org.opencontainers.image.title="bjarne-validator"
 LABEL org.opencontainers.image.description="C/C++ validation container with Clang 21 and sanitizers (Wolfi-based)"
 LABEL org.opencontainers.image.source="https://github.com/3rg0n/bjarne"
 
-# Install runtime dependencies only (no cmake, git, samurai needed)
+# Install runtime dependencies
 RUN apk update && apk add --no-cache \
     clang-21 \
     clang-21-extras \
@@ -105,16 +47,12 @@ RUN ln -sf /usr/lib/llvm-21/bin/lld /usr/bin/lld 2>/dev/null || true && \
 # Install lizard for complexity metrics
 RUN pip3 install --break-system-packages --no-cache-dir lizard
 
-# Copy MSan-instrumented libc++ from builder stage
-COPY --from=builder /opt/msan /opt/msan
-
 # Set environment variables for sanitizers
 ENV ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer
 ENV ASAN_OPTIONS=symbolize=1:detect_leaks=1:print_stacktrace=1
 ENV UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 ENV TSAN_OPTIONS=second_deadlock_stack=1
 ENV MSAN_OPTIONS=symbolize=1:print_stacktrace=1:halt_on_error=1
-ENV MSAN_LIBCXX_PATH=/opt/msan
 
 # Create working directory
 WORKDIR /workspace
@@ -154,13 +92,13 @@ CMD ["clang++", "--version"]
 #    clang++ -std=c++17 -fsanitize=thread -fno-omit-frame-pointer -g -o /tmp/test /src/code.cpp
 #    /tmp/test
 #
-# 6. MemorySanitizer (uninitialized reads) - requires MSan libc++:
+# 6. MemorySanitizer (uninitialized heap reads):
 #    clang++ -std=c++17 -fsanitize=memory -fsanitize-memory-track-origins \
-#      -fno-omit-frame-pointer -g -stdlib=libc++ \
-#      -nostdinc++ -isystem /opt/msan/include/c++/v1 \
-#      -L/opt/msan/lib -Wl,-rpath,/opt/msan/lib \
-#      -o /tmp/test /src/code.cpp
-#    /tmp/test
+#      -fno-omit-frame-pointer -g -O1 -o /tmp/test /src/code.cpp
+#    MSAN_OPTIONS=halt_on_error=1 /tmp/test
+#
+#    Note: MSan detects uninitialized heap memory (malloc/new). For full stack
+#    variable detection, a fully instrumented libc++ would be needed.
 #
 # 7. Complexity check (lizard):
 #    lizard -C 15 -L 100 /src/code.cpp
