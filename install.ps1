@@ -7,12 +7,11 @@
     This script downloads and installs bjarne to your system.
     It will:
     - Download the latest release from GitHub
-    - Extract to a directory in your PATH (or specified location)
-    - Verify checksum
+    - Install to a directory and add to PATH
     - Check for podman/docker
 
 .PARAMETER InstallDir
-    Directory to install bjarne. Default: $env:LOCALAPPDATA\bjarne
+    Directory to install bjarne. Default: $HOME\.bjarne\bin
 
 .PARAMETER Version
     Specific version to install. Default: latest
@@ -29,7 +28,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$InstallDir = "$env:LOCALAPPDATA\bjarne",
+    [string]$InstallDir = "$HOME\.bjarne\bin",
     [string]$Version = "latest",
     [switch]$NoPathUpdate
 )
@@ -52,7 +51,7 @@ function Write-Success {
     Write-Host $Message
 }
 
-function Write-Warning {
+function Write-Warn {
     param([string]$Message)
     Write-Host "[!] " -ForegroundColor Yellow -NoNewline
     Write-Host $Message
@@ -116,71 +115,40 @@ if ($Version -eq "latest") {
 }
 Write-Host "  Version: $Version"
 
-# Download URL
-$zipName = "bjarne_$($Version.TrimStart('v'))_windows_$arch.zip"
-$downloadUrl = "https://github.com/$RepoOwner/$RepoName/releases/download/$Version/$zipName"
-$checksumUrl = "https://github.com/$RepoOwner/$RepoName/releases/download/$Version/checksums.txt"
+# Download URL - binary is released as standalone .exe
+$exeName = "bjarne-windows-$arch.exe"
+$downloadUrl = "https://github.com/$RepoOwner/$RepoName/releases/download/$Version/$exeName"
 
 Write-Step "Downloading bjarne $Version..."
-$tempDir = Join-Path $env:TEMP "bjarne-install-$(Get-Random)"
-New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
-$zipPath = Join-Path $tempDir $zipName
-$checksumPath = Join-Path $tempDir "checksums.txt"
+# Create install directory
+if (-not (Test-Path $InstallDir)) {
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+}
+
+$destPath = Join-Path $InstallDir "bjarne.exe"
 
 try {
-    Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath
-    Write-Success "Downloaded $zipName"
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $destPath
+    Write-Success "Downloaded bjarne.exe"
 }
 catch {
     throw "Failed to download bjarne: $_"
 }
-
-# Verify checksum
-Write-Step "Verifying checksum..."
-try {
-    Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath
-    $checksums = Get-Content $checksumPath
-    $expectedHash = ($checksums | Where-Object { $_ -match $zipName }) -split '\s+' | Select-Object -First 1
-    $actualHash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
-
-    if ($expectedHash -eq $actualHash) {
-        Write-Success "Checksum verified"
-    }
-    else {
-        throw "Checksum mismatch! Expected: $expectedHash, Got: $actualHash"
-    }
-}
-catch {
-    Write-Warning "Could not verify checksum: $_"
-}
-
-# Extract
-Write-Step "Installing to $InstallDir..."
-if (Test-Path $InstallDir) {
-    Remove-Item -Path $InstallDir -Recurse -Force
-}
-New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-
-Expand-Archive -Path $zipPath -DestinationPath $InstallDir -Force
-Write-Success "Extracted bjarne.exe"
 
 # Add to PATH
 if (-not $NoPathUpdate) {
     Write-Step "Updating PATH..."
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($userPath -notlike "*$InstallDir*") {
-        [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallDir", "User")
-        $env:Path = "$env:Path;$InstallDir"
+        [Environment]::SetEnvironmentVariable("Path", "$InstallDir;$userPath", "User")
+        $env:Path = "$InstallDir;$env:Path"
         Write-Success "Added $InstallDir to PATH"
     }
     else {
         Write-Host "  Already in PATH"
     }
 }
-
-# Cleanup
-Remove-Item -Path $tempDir -Recurse -Force
 
 # Check container runtime
 Write-Step "Checking container runtime..."
@@ -189,7 +157,7 @@ if ($runtime) {
     Write-Success "Found $($runtime.Name) at $($runtime.Path)"
 }
 else {
-    Write-Warning "No container runtime found!"
+    Write-Warn "No container runtime found!"
     Write-Host @"
 
   bjarne requires podman or docker for code validation.
@@ -198,16 +166,24 @@ else {
     - Podman (recommended): winget install RedHat.Podman
     - Docker Desktop: https://docker.com/products/docker-desktop
 
+  After installing Podman, run:
+    podman machine init
+    podman machine start
+
 "@ -ForegroundColor Yellow
 }
 
 # Verify installation
 Write-Step "Verifying installation..."
-$bjarnePath = Join-Path $InstallDir "bjarne.exe"
-if (Test-Path $bjarnePath) {
-    $version = & $bjarnePath --version 2>&1 | Select-Object -First 1
-    Write-Success "bjarne installed successfully!"
-    Write-Host "`n  $version" -ForegroundColor Cyan
+if (Test-Path $destPath) {
+    try {
+        $ver = & $destPath --version 2>&1 | Select-Object -First 1
+        Write-Success "bjarne installed successfully!"
+        Write-Host "`n  $ver" -ForegroundColor Cyan
+    }
+    catch {
+        Write-Success "bjarne installed to $destPath"
+    }
 }
 else {
     throw "Installation failed - bjarne.exe not found"
@@ -217,13 +193,14 @@ Write-Host @"
 
 Installation complete!
 
-  Location: $InstallDir
+  Location: $destPath
 
   Quick start:
     bjarne              # Start interactive mode
     bjarne --help       # Show help
-    bjarne --validate   # Validate existing code
 
   First run will prompt to pull the validation container (~500MB).
+
+  NOTE: Restart your terminal for PATH changes to take effect.
 
 "@ -ForegroundColor Green
