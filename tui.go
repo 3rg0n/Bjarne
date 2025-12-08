@@ -1781,22 +1781,13 @@ func StartTUI() error {
 
 	// Initialize LLM provider
 	providerCfg := cfg.GetProviderConfig()
-	fmt.Printf("Connecting to %s...\n", providerDisplayName(cfg.Provider))
 	provider, err := NewProvider(ctx, providerCfg)
 	if err != nil {
 		fmt.Print(FormatUserError(err))
 		return err
 	}
-	fmt.Printf("Provider: %s\n", provider.Name())
-	fmt.Printf("Reflection: %s\n", shortModelName(cfg.ReflectionModel))
-	fmt.Printf("Generation: %s\n", shortModelName(cfg.GenerateModel))
-	fmt.Printf("Oracle: %s\n", shortModelName(cfg.OracleModel))
-	if cfg.EscalateOnFailure && len(cfg.EscalationModels) > 0 {
-		fmt.Printf("Escalation: enabled → %s\n", shortModelName(cfg.EscalationModels[0]))
-	}
-	fmt.Println()
+	fmt.Printf("Ready. (%s)\n", provider.Name())
 	fmt.Println("Type /help for commands, /quit to exit")
-	fmt.Println("Press Esc to interrupt during processing")
 	fmt.Println()
 
 	// Try to load existing workspace index
@@ -1840,22 +1831,6 @@ func StartTUI() error {
 
 	_, err = p.Run()
 	return err
-}
-
-// providerDisplayName returns a human-readable name for the provider
-func providerDisplayName(p ProviderType) string {
-	switch p {
-	case ProviderBedrock:
-		return "AWS Bedrock"
-	case ProviderAnthropic:
-		return "Anthropic API"
-	case ProviderOpenAI:
-		return "OpenAI API"
-	case ProviderGemini:
-		return "Google Gemini API"
-	default:
-		return string(p)
-	}
 }
 
 // showValidatorConfig displays and manages validator configuration
