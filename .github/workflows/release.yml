@@ -10,28 +10,16 @@ permissions:
   packages: write
 
 jobs:
-  build:
-    name: Build binaries
+  build-linux:
+    name: Build Linux binaries
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
+          - goarch: amd64
             suffix: linux-amd64
-          - goos: linux
-            goarch: arm64
+          - goarch: arm64
             suffix: linux-arm64
-          - goos: darwin
-            goarch: amd64
-            suffix: darwin-amd64
-          - goos: darwin
-            goarch: arm64
-            suffix: darwin-arm64
-          - goos: windows
-            goarch: amd64
-            suffix: windows-amd64.exe
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,17 +29,38 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Install ONNX Runtime
+        run: |
+          # Download ONNX Runtime for Linux
+          ONNX_VERSION="1.16.3"
+          if [ "${{ matrix.goarch }}" = "amd64" ]; then
+            ONNX_ARCH="x64"
+          else
+            ONNX_ARCH="aarch64"
+          fi
+          wget -q "https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-${ONNX_ARCH}-${ONNX_VERSION}.tgz"
+          tar -xzf onnxruntime-linux-${ONNX_ARCH}-${ONNX_VERSION}.tgz
+          sudo cp onnxruntime-linux-${ONNX_ARCH}-${ONNX_VERSION}/lib/* /usr/local/lib/
+          sudo ldconfig
+
+      - name: Install cross-compiler for ARM64
+        if: matrix.goarch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Get version
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Build
         env:
-          GOOS: ${{ matrix.goos }}
+          GOOS: linux
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+          CGO_ENABLED: 1
+          CC: ${{ matrix.goarch == 'arm64' && 'aarch64-linux-gnu-gcc' || 'gcc' }}
         run: |
-          go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+          go build -tags onnx -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
             -o bjarne-${{ matrix.suffix }} .
 
       - name: Upload artifact
@@ -60,9 +69,89 @@ jobs:
           name: bjarne-${{ matrix.suffix }}
           path: bjarne-${{ matrix.suffix }}
 
+  build-macos:
+    name: Build macOS binaries
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+            suffix: darwin-amd64
+          - goarch: arm64
+            suffix: darwin-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install ONNX Runtime
+        run: |
+          brew install onnxruntime
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build
+        env:
+          GOOS: darwin
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
+        run: |
+          go build -tags onnx -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o bjarne-${{ matrix.suffix }} .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bjarne-${{ matrix.suffix }}
+          path: bjarne-${{ matrix.suffix }}
+
+  build-windows:
+    name: Build Windows binary
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install ONNX Runtime
+        shell: pwsh
+        run: |
+          $ONNX_VERSION = "1.16.3"
+          Invoke-WebRequest -Uri "https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-win-x64-${ONNX_VERSION}.zip" -OutFile "onnxruntime.zip"
+          Expand-Archive -Path "onnxruntime.zip" -DestinationPath "."
+          $env:PATH = "$PWD\onnxruntime-win-x64-${ONNX_VERSION}\lib;$env:PATH"
+          Copy-Item "onnxruntime-win-x64-${ONNX_VERSION}\lib\*" -Destination "C:\Windows\System32\" -Force
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build
+        env:
+          CGO_ENABLED: 1
+        run: |
+          go build -tags onnx -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" -o bjarne-windows-amd64.exe .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bjarne-windows-amd64.exe
+          path: bjarne-windows-amd64.exe
+
   release:
     name: Create Release
-    needs: build
+    needs: [build-linux, build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -110,9 +199,31 @@ jobs:
             chmod +x bjarne-*
             ```
 
+            ### ONNX Runtime (for /init semantic indexing)
+
+            These binaries include ONNX support for semantic code search. To use `/init`:
+
+            **Linux:**
+            ```bash
+            # Ubuntu/Debian
+            wget https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-linux-x64-1.16.3.tgz
+            tar -xzf onnxruntime-linux-x64-1.16.3.tgz
+            sudo cp onnxruntime-linux-x64-1.16.3/lib/* /usr/local/lib/
+            sudo ldconfig
+            ```
+
+            **macOS:**
+            ```bash
+            brew install onnxruntime
+            ```
+
+            **Windows:**
+            Download from [ONNX Runtime releases](https://github.com/microsoft/onnxruntime/releases) and add to PATH.
+
             ### Requirements
             - AWS credentials configured (`aws configure` or environment variables)
             - Docker or Podman for validation container
+            - (Optional) ONNX Runtime for `/init` semantic indexing
 
             ### Quick Start
             ```bash
