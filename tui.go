@@ -439,6 +439,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, textarea.Blink
 		}
 
+		// Check if the LLM refused to proceed (e.g., "I won't generate buggy code")
+		if containsRefusal(reflection) {
+			m.addOutput("")
+			m.addOutput(m.styles.Warning.Render("(Analysis declined to proceed - no code to generate)"))
+			m.state = StateInput
+			m.textarea.Focus()
+			return m, textarea.Blink
+		}
+
 		// Auto-proceed conditions (T-038f):
 		// - EASY tasks: straightforward, no need to confirm
 		// - CONTINUE intent: user is iterating on existing code
@@ -1488,6 +1497,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.addOutput("  /help, /h              Show this help")
 		m.addOutput("  /config [category]     Configure validators (game, hft, embedded, security, perf)")
 		m.addOutput("  /init                  Index current directory for context-aware generation")
+		m.addOutput("  /validate <file>, /v   Validate existing file without AI generation")
 		m.addOutput("  /save [file|dir], /s   Save code (multi-file: /save dir/ or /save)")
 		m.addOutput("  /clear, /c             Clear conversation and start fresh")
 		m.addOutput("  /code, /show           Show last generated code")
@@ -1739,6 +1749,37 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.addOutput(fmt.Sprintf("  Output tokens: %d", output))
 		m.addOutput(fmt.Sprintf("  Total tokens:  %d", total))
 		m.addOutput("")
+
+	case "/validate", "/v":
+		// Direct validation without AI generation
+		if len(parts) < 2 {
+			m.addOutput(m.styles.Error.Render("Usage: /validate <file>"))
+			m.addOutput(m.styles.Dim.Render("  Validates an existing file through all gates without AI generation."))
+			m.textarea.Reset()
+			return m, nil
+		}
+		filename := parts[1]
+
+		// Read the file
+		content, err := os.ReadFile(filename)
+		if err != nil {
+			m.addOutput(m.styles.Error.Render(fmt.Sprintf("Error reading file: %s", err.Error())))
+			m.textarea.Reset()
+			return m, nil
+		}
+
+		// Store the code for validation
+		m.currentCode = string(content)
+		m.currentFiles = []CodeFile{{Filename: filepath.Base(filename), Content: string(content)}}
+		m.originalPrompt = fmt.Sprintf("(Direct validation of %s)", filename)
+
+		// Show what we're validating
+		m.addOutput("")
+		m.addOutput(m.styles.Info.Render(fmt.Sprintf("Validating: %s (%d bytes)", filename, len(content))))
+
+		m.textarea.Reset()
+		m.textarea.Blur()
+		return m.startValidation()
 
 	default:
 		m.addOutput(m.styles.Error.Render("Unknown command: " + cmd))

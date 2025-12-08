@@ -236,3 +236,71 @@ func TestGetEnvOrDefault(t *testing.T) {
 		t.Errorf("getEnvOrDefault() = %q, want %q", result, "custom_value")
 	}
 }
+
+func TestContainsRefusal(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		expected bool
+	}{
+		{
+			name:     "normal analysis - no refusal",
+			text:     "I'll create a simple hello world program for you.",
+			expected: false,
+		},
+		{
+			name:     "I won't generate",
+			text:     "I won't generate intentionally buggy code. That would be harmful.",
+			expected: true,
+		},
+		{
+			name:     "I will not",
+			text:     "I will not write code that deliberately crashes.",
+			expected: true,
+		},
+		{
+			name:     "I cannot",
+			text:     "I cannot create malicious software.",
+			expected: true,
+		},
+		{
+			name:     "deliberately buggy",
+			text:     "Asking for deliberately buggy code is not something I can help with.",
+			expected: true,
+		},
+		{
+			name:     "unsafe by design",
+			text:     "Code that is unsafe by design would fail all our sanitizers anyway.",
+			expected: true,
+		},
+		{
+			name:     "decline to",
+			text:     "I must decline to write this kind of code.",
+			expected: true,
+		},
+		{
+			name:     "not appropriate",
+			text:     "This is not appropriate to generate.",
+			expected: true,
+		},
+		{
+			name:     "question about approach - not a refusal",
+			text:     "I'm not sure which approach you'd prefer. Should I use recursion?",
+			expected: false,
+		},
+		{
+			name:     "case insensitive",
+			text:     "I WON'T generate that kind of code.",
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := containsRefusal(tt.text)
+			if result != tt.expected {
+				t.Errorf("containsRefusal() = %v, want %v for text: %q", result, tt.expected, tt.text)
+			}
+		})
+	}
+}

@@ -337,45 +337,77 @@ func wrapText(text string, width int) []string {
 // containsQuestion checks if text contains a question that needs user response
 // Used to determine if we should wait for user input even for EASY tasks
 func containsQuestion(text string) bool {
+	// Simple check: any question mark means we should wait for user input
+	// The LLM is asking something and we should let the user respond
+	if strings.Contains(text, "?") {
+		return true
+	}
+
+	// Also check for common question phrases without question marks
+	lower := strings.ToLower(text)
+	questionPatterns := []string{
+		"correct me if",
+		"any corrections",
+		"let me know",
+		"before i proceed",
+		"before proceeding",
+	}
+	for _, pattern := range questionPatterns {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// containsRefusal checks if the analysis text indicates a refusal to generate code
+// This catches cases where the LLM says "I won't generate this" or similar
+func containsRefusal(text string) bool {
 	text = strings.ToLower(text)
 
-	// Check for question marks in non-rhetorical context
-	if strings.Contains(text, "?") {
-		// Common question patterns that indicate waiting for user
-		questionPatterns := []string{
-			"what's the context",
-			"what is the context",
-			"what are you",
-			"what do you",
-			"help me understand",
-			"can you clarify",
-			"could you clarify",
-			"can you explain",
-			"could you explain",
-			"what would you",
-			"correct me if",
-			"any corrections",
-			"sound good",
-			"does that work",
-			"is that correct",
-			"is that right",
-			"let me know",
-			"what's your",
-			"what is your",
-		}
-		for _, pattern := range questionPatterns {
-			if strings.Contains(text, pattern) {
-				return true
-			}
-		}
+	// Patterns that indicate refusal to proceed
+	refusalPatterns := []string{
+		"i won't",
+		"i will not",
+		"i cannot",
+		"i can't",
+		"i refuse",
+		"i'm not going to",
+		"not going to generate",
+		"not going to write",
+		"not going to create",
+		"won't generate",
+		"won't write",
+		"won't create",
+		"cannot generate",
+		"cannot write",
+		"cannot create",
+		"not appropriate",
+		"not able to",
+		"unable to",
+		"this isn't something",
+		"this is not something",
+		"against my",
+		"beyond my scope",
+		"outside my scope",
+		"not within my",
+		"decline to",
+		"must decline",
+		"have to decline",
+		"deliberately buggy",
+		"intentionally buggy",
+		"deliberately broken",
+		"intentionally broken",
+		"malicious",
+		"harmful",
+		"dangerous code",
+		"unsafe by design",
+	}
 
-		// Check if ends with a question (last sentence has ?)
-		lines := strings.Split(strings.TrimSpace(text), "\n")
-		if len(lines) > 0 {
-			lastLine := strings.TrimSpace(lines[len(lines)-1])
-			if strings.HasSuffix(lastLine, "?") {
-				return true
-			}
+	for _, pattern := range refusalPatterns {
+		if strings.Contains(text, pattern) {
+			return true
 		}
 	}
 

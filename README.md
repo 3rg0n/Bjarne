@@ -136,7 +136,7 @@ If any stage fails, bjarne sends the error back to the AI with guidance on how t
 [Business Source License 1.1](LICENSE)
 
 - **Free for**: Personal projects, learning, research, academic use, non-profits, internal evaluation
-- **Commercial production use**: Requires a license - contact evan@copeland.dev
+- **Commercial production use**: Requires a license - contact 62959009+3rg0n@users.noreply.github.com
 - **Change Date**: December 8, 2028 → Apache 2.0
 
 ## Building from Source
