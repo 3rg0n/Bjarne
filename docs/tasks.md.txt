@@ -1,5 +1,5 @@
 # BJARNE TASKS
-_Last reviewed: 2025-12-05_
+_Last reviewed: 2025-12-08_
 
 ## Active
 - [ ] Test MSan with real-world code generation scenarios
@@ -26,6 +26,18 @@ _Last reviewed: 2025-12-05_
 - [ ] CI/CD integration - GitHub Action for bjarne validation
 
 ## Completed
+- [x] BSL 1.1 License for source-available distribution
+  - 4-year change date to Apache 2.0
+  - Personal/research/academic use free
+  - Commercial production use requires license
+- [x] Cross-platform install scripts
+  - install.sh for macOS/Linux: `curl -fsSL ... | bash`
+  - install.ps1 for Windows: `irm ... | iex`
+  - Auto-detect platform/arch, add to PATH, check for Podman/Docker
+- [x] Platform-specific Podman installation guidance
+  - Helpful error messages when no container runtime found
+  - Distro detection for Linux (apt/dnf/pacman/zypper)
+  - Checks ~/.bjarne/bin/ for local binaries
 - [x] Easy installation / distribution
   - goreleaser for GitHub Releases (linux/darwin/windows, amd64/arm64)
   - Homebrew tap: `brew install 3rg0n/tap/bjarne`
