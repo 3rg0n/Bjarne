@@ -1000,7 +1000,11 @@ func (m *Model) buildSystemPrompt() string {
 				contextBuilder.WriteString("</relevant_code_context>\n")
 
 				prompt += "\n\n" + contextBuilder.String()
-				prompt += "\nFollow the patterns and conventions shown in the relevant code context above."
+				prompt += "\nIMPORTANT: Generate code that integrates with this codebase:"
+				prompt += "\n- Match the naming conventions (case, prefixes, suffixes)"
+				prompt += "\n- Use the same include patterns and header structure"
+				prompt += "\n- Follow the coding style (braces, spacing, etc.)"
+				prompt += "\n- Reuse existing types, utilities, and patterns where applicable"
 				return prompt
 			}
 		}
@@ -1010,7 +1014,11 @@ func (m *Model) buildSystemPrompt() string {
 	if m.workspaceIndex != nil && len(m.workspaceIndex.Files) > 0 {
 		context := m.workspaceIndex.GetContextForPrompt(2000) // ~2000 tokens max
 		if context != "" {
-			prompt += "\n\n" + context + "\n\nIntegrate with the existing codebase where appropriate."
+			prompt += "\n\n" + context
+			prompt += "\n\nIMPORTANT: Generate code that integrates with this codebase:"
+			prompt += "\n- Match existing naming conventions and coding style"
+			prompt += "\n- Use compatible types and include patterns"
+			prompt += "\n- Code should fit naturally alongside existing files"
 		}
 	}
 
