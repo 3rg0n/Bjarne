@@ -13,7 +13,10 @@
 # - AddressSanitizer (ASAN)
 # - UndefinedBehaviorSanitizer (UBSAN)
 # - ThreadSanitizer (TSAN)
-# - MemorySanitizer (MSan) - detects uninitialized heap memory
+# - MemorySanitizer (MSan) - detects uninitialized memory
+#     * Heap memory: Full detection via 70+ built-in interceptors
+#     * Stack/local variables: Detection requires code instrumentation (user code is instrumented)
+#     * Note: Uses LLVM-blessed approach with uninstrumented glibc + interceptors
 #
 # Build: podman build -f docker/Dockerfile -t bjarne-validator:wolfi ./docker/
 # Run:   podman run --rm -v $(pwd)/code:/src:ro bjarne-validator:wolfi clang++ --version
@@ -92,13 +95,19 @@ CMD ["clang++", "--version"]
 #    clang++ -std=c++17 -fsanitize=thread -fno-omit-frame-pointer -g -o /tmp/test /src/code.cpp
 #    /tmp/test
 #
-# 6. MemorySanitizer (uninitialized heap reads):
+# 6. MemorySanitizer (uninitialized memory reads):
 #    clang++ -std=c++17 -fsanitize=memory -fsanitize-memory-track-origins \
 #      -fno-omit-frame-pointer -g -O1 -o /tmp/test /src/code.cpp
 #    MSAN_OPTIONS=halt_on_error=1 /tmp/test
 #
-#    Note: MSan detects uninitialized heap memory (malloc/new). For full stack
-#    variable detection, a fully instrumented libc++ would be needed.
+#    MSan Detection Capabilities (LLVM-blessed approach):
+#    - Heap allocations (malloc/new): Full detection via ~70 interceptors
+#    - User code: Fully instrumented - uninitialized stack/local vars detected
+#    - C++ stdlib: Using system libc++ (not instrumented)
+#    - glibc: Using system glibc (not instrumented, interceptors cover common functions)
+#
+#    Note: Container must run with --security-opt seccomp=unconfined
+#    to allow MSan to disable ASLR via personality() syscall.
 #
 # 7. Complexity check (lizard):
 #    lizard -C 15 -L 100 /src/code.cpp
