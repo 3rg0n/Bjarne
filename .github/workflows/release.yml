@@ -199,31 +199,13 @@ jobs:
             chmod +x bjarne-*
             ```
 
-            ### ONNX Runtime (for /init semantic indexing)
-
-            These binaries include ONNX support for semantic code search. To use `/init`:
-
-            **Linux:**
-            ```bash
-            # Ubuntu/Debian
-            wget https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-linux-x64-1.16.3.tgz
-            tar -xzf onnxruntime-linux-x64-1.16.3.tgz
-            sudo cp onnxruntime-linux-x64-1.16.3/lib/* /usr/local/lib/
-            sudo ldconfig
-            ```
-
-            **macOS:**
-            ```bash
-            brew install onnxruntime
-            ```
-
-            **Windows:**
-            Download from [ONNX Runtime releases](https://github.com/microsoft/onnxruntime/releases) and add to PATH.
-
             ### Requirements
             - AWS credentials configured (`aws configure` or environment variables)
             - Docker or Podman for validation container
-            - (Optional) ONNX Runtime for `/init` semantic indexing
+
+            ### Workspace Indexing (/init)
+            For context-aware code generation, use `/init` to index your codebase.
+            ONNX Runtime is auto-downloaded on first use (~15MB).
 
             ### Quick Start
             ```bash

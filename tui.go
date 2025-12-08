@@ -1555,6 +1555,17 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.addOutput("")
 		m.addOutput(m.styles.Warning.Render("Building semantic index..."))
 
+		// Auto-download ONNX runtime if not available
+		if !IsONNXAvailable() {
+			m.addOutput(m.styles.Dim.Render("  ONNX runtime not found, downloading..."))
+			if err := EnsureONNXRuntime(func(msg string) {
+				m.addOutput(m.styles.Dim.Render("  " + msg))
+			}); err != nil {
+				m.addOutput(m.styles.Warning.Render("  ONNX download failed: " + err.Error()))
+				m.addOutput(m.styles.Info.Render("  Will use pseudo-embeddings instead."))
+			}
+		}
+
 		cfg := DefaultVectorIndexConfig()
 		vecIndex, err := NewVectorIndex(cfg)
 		if err != nil {
@@ -1563,7 +1574,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 			break
 		}
 
-		// Download model if needed
+		// Download embedding model if needed
 		ctx := context.Background()
 		if err := vecIndex.EnsureModel(ctx, func(msg string) {
 			m.addOutput(m.styles.Dim.Render("  " + msg))
@@ -1590,7 +1601,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 			if IsONNXAvailable() {
 				m.addOutput(m.styles.Dim.Render("  Using ONNX embeddings"))
 			} else {
-				m.addOutput(m.styles.Dim.Render("  Using pseudo-embeddings (install ONNX for better results)"))
+				m.addOutput(m.styles.Dim.Render("  Using pseudo-embeddings (ONNX unavailable)"))
 			}
 		}
 
