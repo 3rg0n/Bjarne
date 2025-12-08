@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -19,9 +20,10 @@ type ContainerRuntime struct {
 
 // DetectContainerRuntime finds an available container runtime
 // Preference: podman > docker (per ADR-005)
+// Also checks ~/.bjarne/bin/ for locally installed binaries
 func DetectContainerRuntime() (*ContainerRuntime, error) {
 	// Try podman first (preferred - daemonless, rootless)
-	if path, err := exec.LookPath("podman"); err == nil {
+	if path := findContainerBinary("podman"); path != "" {
 		return &ContainerRuntime{
 			binary:    path,
 			imageName: getImageName(),
@@ -29,14 +31,37 @@ func DetectContainerRuntime() (*ContainerRuntime, error) {
 	}
 
 	// Fall back to docker
-	if path, err := exec.LookPath("docker"); err == nil {
+	if path := findContainerBinary("docker"); path != "" {
 		return &ContainerRuntime{
 			binary:    path,
 			imageName: getImageName(),
 		}, nil
 	}
 
-	return nil, ErrNoContainerRuntime()
+	// No container runtime found - return helpful error with install instructions
+	info := GetPodmanInstallInfo()
+	return nil, &PodmanNotFoundError{Instructions: info.Manual}
+}
+
+// findContainerBinary searches for a container binary in PATH and ~/.bjarne/bin/
+func findContainerBinary(name string) string {
+	// First check standard PATH
+	if path, err := exec.LookPath(name); err == nil {
+		return path
+	}
+
+	// Check ~/.bjarne/bin/
+	if home, err := os.UserHomeDir(); err == nil {
+		localPath := filepath.Join(home, ".bjarne", "bin", name)
+		if runtime.GOOS == "windows" {
+			localPath += ".exe"
+		}
+		if _, err := os.Stat(localPath); err == nil {
+			return localPath
+		}
+	}
+
+	return ""
 }
 
 // Default container image (published to ghcr.io on release)
