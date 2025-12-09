@@ -135,6 +135,10 @@ type Model struct {
 	// Terminal size
 	width  int
 	height int
+
+	// Debug logging
+	debugMode    bool   // When true, log validation errors to file
+	debugLogPath string // Path to debug log file
 }
 
 // Messages for async operations
@@ -566,11 +570,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ctx.Err() == context.Canceled {
 				return m, nil
 			}
+			m.debugLog("Validation system error: %s", msg.err.Error())
 			m.addOutput(m.styles.Error.Render("Validation error: " + msg.err.Error()))
 			m.state = StateInput
 			m.textarea.Focus()
 			return m, nil
 		}
+
+		// Log all validation results to debug file
+		m.debugLogValidationResults(msg.results)
 
 		allPassed := true
 		var failedErrors []string
@@ -785,6 +793,66 @@ func (m *Model) drawBox(title string, width int) {
 	m.addOutput(m.styles.Warning.Render(boxTopLeft + strings.Repeat(boxHorizontal, innerWidth) + boxTopRight))
 	m.addOutput(m.styles.Warning.Render(boxVertical + strings.Repeat(" ", leftPad) + title + strings.Repeat(" ", rightPad) + boxVertical))
 	m.addOutput(m.styles.Warning.Render(boxBottomLeft + strings.Repeat(boxHorizontal, innerWidth) + boxBottomRight))
+}
+
+// debugLog writes a message to the debug log file if debug mode is enabled
+func (m *Model) debugLog(format string, args ...interface{}) {
+	if !m.debugMode || m.debugLogPath == "" {
+		return
+	}
+
+	// Open file in append mode
+	f, err := os.OpenFile(m.debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	// Write timestamp and message
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	msg := fmt.Sprintf(format, args...)
+	_, _ = fmt.Fprintf(f, "[%s] %s\n", timestamp, msg)
+}
+
+// debugLogValidationResults logs detailed validation results to the debug file
+func (m *Model) debugLogValidationResults(results []ValidationResult) {
+	if !m.debugMode {
+		return
+	}
+
+	m.debugLog("=== Validation Results ===")
+	m.debugLog("Original prompt: %s", m.originalPrompt)
+	m.debugLog("Difficulty: %s, Intent: %s", m.difficulty, m.intent)
+	m.debugLog("")
+
+	// Log the generated code
+	if len(m.currentFiles) > 1 {
+		for _, f := range m.currentFiles {
+			m.debugLog("--- File: %s ---", f.Filename)
+			m.debugLog("%s", f.Content)
+		}
+	} else if m.currentCode != "" {
+		m.debugLog("--- Generated Code ---")
+		m.debugLog("%s", m.currentCode)
+	}
+	m.debugLog("")
+
+	// Log each validation result
+	for _, r := range results {
+		status := "PASS"
+		if !r.Success {
+			status = "FAIL"
+		}
+		m.debugLog("[%s] Stage: %s (%.2fs)", status, r.Stage, r.Duration.Seconds())
+		if r.Output != "" {
+			m.debugLog("  Output: %s", r.Output)
+		}
+		if r.Error != "" {
+			m.debugLog("  Error: %s", r.Error)
+		}
+	}
+	m.debugLog("=== End Validation Results ===")
+	m.debugLog("")
 }
 
 func (m *Model) startClassifying(prompt string) (Model, tea.Cmd) {
@@ -1496,6 +1564,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		m.addOutput("Commands:")
 		m.addOutput("  /help, /h              Show this help")
 		m.addOutput("  /config [category]     Configure validators (game, hft, embedded, security, perf)")
+		m.addOutput("  /debug                 Toggle debug logging (saves validation errors to file)")
 		m.addOutput("  /init                  Index current directory for context-aware generation")
 		m.addOutput("  /validate <file>, /v   Validate existing file without AI generation")
 		m.addOutput("  /save [file|dir], /s   Save code (multi-file: /save dir/ or /save)")
@@ -1620,6 +1689,25 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 
 	case "/config":
 		m.showValidatorConfig(parts[1:])
+
+	case "/debug":
+		m.debugMode = !m.debugMode
+		m.addOutput("")
+		if m.debugMode {
+			// Set up debug log path
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				m.debugLogPath = "bjarne-debug.log"
+			} else {
+				debugDir := filepath.Join(homeDir, ".bjarne")
+				_ = os.MkdirAll(debugDir, 0750)
+				m.debugLogPath = filepath.Join(debugDir, "debug.log")
+			}
+			m.addOutput(m.styles.Success.Render("Debug logging enabled"))
+			m.addOutput(fmt.Sprintf("Log file: %s", m.styles.Dim.Render(m.debugLogPath)))
+		} else {
+			m.addOutput(m.styles.Warning.Render("Debug logging disabled"))
+		}
 
 	case "/clear", "/c":
 		m.conversation = []Message{}
