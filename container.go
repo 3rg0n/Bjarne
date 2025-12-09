@@ -547,6 +547,10 @@ func (c *ContainerRuntime) ValidateCodeWithProgress(ctx context.Context, code st
 func (c *ContainerRuntime) runValidationStage(ctx context.Context, tmpDir, stage string, command ...string) ValidationResult {
 	start := time.Now()
 
+	// Convert Windows path to forward slashes for Podman/Docker
+	// On Windows, os.MkdirTemp returns C:\Users\...\Temp\... but containers expect C:/Users/.../Temp/...
+	mountPath := filepath.ToSlash(tmpDir)
+
 	// Build container run command
 	// Note: We don't use --read-only because sanitizers need to write to /tmp
 	// Security is maintained via --network none and read-only source mount
@@ -555,7 +559,7 @@ func (c *ContainerRuntime) runValidationStage(ctx context.Context, tmpDir, stage
 		"run", "--rm",
 		"--network", "none", // No network access
 		"--security-opt", "seccomp=unconfined", // Required for TSAN
-		"-v", tmpDir + ":/src:ro", // Mount code read-only
+		"-v", mountPath + ":/src:ro", // Mount code read-only
 		"--timeout", "120", // 2 minute timeout
 		c.imageName,
 	}
