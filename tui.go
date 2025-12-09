@@ -1815,6 +1815,9 @@ func StartTUI() error {
 	// Show splash screen
 	printSplashScreen()
 
+	// Check for bjarne updates (non-blocking, silently fails)
+	PrintUpdateNotice()
+
 	// Initialize container runtime (silent unless error)
 	container, err := DetectContainerRuntime()
 	if err != nil {
