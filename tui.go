@@ -1789,6 +1789,22 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// printSplashScreen displays the bjarne logo and version
+func printSplashScreen() {
+	// ASCII art logo - stylized "bjarne" text
+	logo := `
+    ╔══════════════════════════════════════════════════════════════╗
+    ║   _     _                                                    ║
+    ║  | |__ (_) __ _ _ __ _ __   ___                              ║
+    ║  | '_ \| |/ _` + "`" + ` | '__| '_ \ / _ \                             ║
+    ║  | |_) | | (_| | |  | | | |  __/                             ║
+    ║  |_.__// |\__,_|_|  |_| |_|\___|                             ║
+    ║      |__/                                                    ║
+    ╚══════════════════════════════════════════════════════════════╝`
+	fmt.Println("\033[96m" + logo + "\033[0m")
+	fmt.Printf("    \033[90m%s - AI-assisted C/C++ with mandatory validation\033[0m\n\n", Version)
+}
+
 // StartTUI initializes everything and starts the bubbletea TUI
 func StartTUI() error {
 	ctx := context.Background()
@@ -1796,18 +1812,15 @@ func StartTUI() error {
 	// Load configuration
 	cfg := LoadConfig()
 
-	fmt.Printf("bjarne %s\n", Version)
-	fmt.Println("AI-assisted C/C++ code generation with mandatory validation")
-	fmt.Println()
+	// Show splash screen
+	printSplashScreen()
 
-	// Initialize container runtime
-	fmt.Println("Detecting container runtime...")
+	// Initialize container runtime (silent unless error)
 	container, err := DetectContainerRuntime()
 	if err != nil {
 		fmt.Print(FormatUserError(err))
 		return err
 	}
-	fmt.Printf("Using container runtime: %s\n", container.GetBinary())
 
 	// Check if validation image exists
 	if !container.ImageExists(ctx) {
@@ -1816,28 +1829,22 @@ func StartTUI() error {
 			fmt.Println("         Code generation will work, but validation will be skipped.")
 		}
 	} else {
-		// Image exists, check for updates
-		fmt.Printf("Validation container: %s\n", container.imageName)
-		fmt.Print("Checking for updates... ")
+		// Only prompt if update available (check silently)
 		if container.CheckForUpdate(ctx) {
-			fmt.Println("\033[93mupdate available!\033[0m")
-			fmt.Print("Pull the latest container image? [Y/n] ")
+			fmt.Printf("\033[93mContainer update available.\033[0m Pull now? [Y/n] ")
 			reader := bufio.NewReader(os.Stdin)
 			response, _ := reader.ReadString('\n')
 			response = strings.TrimSpace(strings.ToLower(response))
 			if response == "" || response == "y" || response == "yes" {
-				fmt.Println("Pulling latest image...")
+				fmt.Print("Pulling... ")
 				if err := container.PullImage(ctx); err != nil {
-					fmt.Printf("\033[93mWarning:\033[0m Failed to update: %v\n", err)
+					fmt.Printf("\033[93mfailed:\033[0m %v\n", err)
 				} else {
-					fmt.Println("\033[92mContainer updated!\033[0m")
+					fmt.Println("\033[92mdone\033[0m")
 				}
 			}
-		} else {
-			fmt.Println("\033[92mup to date\033[0m")
 		}
 	}
-	fmt.Println()
 
 	// Initialize LLM provider
 	providerCfg := cfg.GetProviderConfig()
@@ -1846,17 +1853,16 @@ func StartTUI() error {
 		fmt.Print(FormatUserError(err))
 		return err
 	}
-	fmt.Printf("Ready. (%s)\n", provider.Name())
-	fmt.Println("Type /help for commands, /quit to exit")
-	fmt.Println()
+
+	// Show compact status line
+	fmt.Printf("    \033[92m●\033[0m %s  \033[92m●\033[0m %s  ", container.GetBinary(), provider.Name())
 
 	// Try to load existing workspace index
 	var workspaceIndex *WorkspaceIndex
 	cwd, _ := os.Getwd()
 	if idx, err := LoadIndex(cwd); err == nil {
 		workspaceIndex = idx
-		fmt.Printf("Workspace index: %d files, %d functions, %d classes\n",
-			idx.Summary.TotalFiles, idx.Summary.TotalFunctions, idx.Summary.TotalClasses)
+		fmt.Printf("\033[92m●\033[0m %d files indexed", idx.Summary.TotalFiles)
 	}
 
 	// Try to load existing vector index for semantic search
@@ -1864,12 +1870,11 @@ func StartTUI() error {
 	vecCfg := DefaultVectorIndexConfig()
 	if vi, err := NewVectorIndex(vecCfg); err == nil {
 		// Check if index has embeddings
-		_, chunks, embeddings, _ := vi.GetStats(ctx)
+		_, _, embeddings, _ := vi.GetStats(ctx)
 		if embeddings > 0 {
 			// Initialize embedder for search
 			_ = vi.EnsureModel(ctx, nil)
 			vectorIndex = vi
-			fmt.Printf("Semantic index: %d chunks, %d embeddings\n", chunks, embeddings)
 
 			// Quick incremental update for changed files (non-blocking)
 			go func() {
@@ -1882,6 +1887,8 @@ func StartTUI() error {
 		}
 	}
 	fmt.Println()
+	fmt.Println()
+	fmt.Println("    Type your request or /help for commands")
 
 	m := NewModel(provider, container, cfg)
 	m.workspaceIndex = workspaceIndex
