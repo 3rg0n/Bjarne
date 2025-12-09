@@ -109,36 +109,36 @@ release:
     ---
     **Full documentation:** https://github.com/3rg0n/bjarne
 
-# Homebrew tap
-brews:
-  - repository:
-      owner: 3rg0n
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
-    homepage: "https://github.com/3rg0n/bjarne"
-    description: "AI-assisted C/C++ code generation with rigorous validation"
-    license: "MIT"
-    install: |
-      bin.install "bjarne"
-    test: |
-      system "#{bin}/bjarne", "--version"
-    dependencies:
-      - name: podman
-        type: optional
-    caveats: |
-      bjarne requires podman or docker for code validation.
-      Install with: brew install podman
+# Homebrew tap (disabled - repos not set up yet)
+# brews:
+#   - repository:
+#       owner: 3rg0n
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+#     directory: Formula
+#     homepage: "https://github.com/3rg0n/bjarne"
+#     description: "AI-assisted C/C++ code generation with rigorous validation"
+#     license: "MIT"
+#     install: |
+#       bin.install "bjarne"
+#     test: |
+#       system "#{bin}/bjarne", "--version"
+#     dependencies:
+#       - name: podman
+#         type: optional
+#     caveats: |
+#       bjarne requires podman or docker for code validation.
+#       Install with: brew install podman
 
-# Scoop bucket for Windows
-scoops:
-  - repository:
-      owner: 3rg0n
-      name: scoop-bucket
-      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
-    homepage: "https://github.com/3rg0n/bjarne"
-    description: "AI-assisted C/C++ code generation with rigorous validation"
-    license: "MIT"
+# Scoop bucket for Windows (disabled - repos not set up yet)
+# scoops:
+#   - repository:
+#       owner: 3rg0n
+#       name: scoop-bucket
+#       token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+#     homepage: "https://github.com/3rg0n/bjarne"
+#     description: "AI-assisted C/C++ code generation with rigorous validation"
+#     license: "MIT"
 
 # Announce releases
 announce:
