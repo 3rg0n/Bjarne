@@ -107,6 +107,7 @@ Environment variables:
 | `BJARNE_API_KEY` | API key (required for non-Bedrock providers) | - |
 | `BJARNE_MODEL` | Default model: `haiku`, `sonnet`, `opus` | `sonnet` |
 | `BJARNE_VALIDATOR_IMAGE` | Custom validator container image | `ghcr.io/3rg0n/bjarne-validator:latest` |
+| `BJARNE_ASCII` | Use ASCII box characters (`0` or `1`) | `1` on macOS |
 | `AWS_REGION` | AWS region for Bedrock | `us-west-2` |
 
 ### Model Selection

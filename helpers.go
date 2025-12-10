@@ -12,9 +12,10 @@ import (
 // handleFirstRunPull handles the first-run container pull experience
 func handleFirstRunPull(ctx context.Context, container *ContainerRuntime) error {
 	fmt.Println()
-	fmt.Println("\033[93m┌─────────────────────────────────────────────────────────────┐\033[0m")
-	fmt.Println("\033[93m│                     First-time Setup                        │\033[0m")
-	fmt.Println("\033[93m└─────────────────────────────────────────────────────────────┘\033[0m")
+	// Use simple ASCII box for cross-platform compatibility
+	fmt.Println("\033[93m+-------------------------------------------------------------+\033[0m")
+	fmt.Println("\033[93m|                     First-time Setup                        |\033[0m")
+	fmt.Println("\033[93m+-------------------------------------------------------------+\033[0m")
 	fmt.Println()
 	fmt.Println("bjarne requires a validation container to check your C/C++ code")
 	fmt.Println("for memory errors, undefined behavior, and data races.")

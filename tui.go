@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -31,7 +32,8 @@ const (
 )
 
 // Box drawing characters for visual sections
-const (
+// Use ASCII variants on macOS or when BJARNE_ASCII=1 to avoid terminal width issues
+var (
 	boxTopLeft     = "╔"
 	boxTopRight    = "╗"
 	boxBottomLeft  = "╚"
@@ -42,6 +44,36 @@ const (
 	treeBranch     = "├─"
 	treeEnd        = "└─"
 )
+
+func init() {
+	// Use ASCII box characters on macOS or when BJARNE_ASCII=1
+	// Unicode box-drawing characters cause alignment issues on some terminals
+	if shouldUseASCII() {
+		boxTopLeft = "+"
+		boxTopRight = "+"
+		boxBottomLeft = "+"
+		boxBottomRight = "+"
+		boxHorizontal = "-"
+		boxVertical = "|"
+		treeVert = "|"
+		treeBranch = "+-"
+		treeEnd = "+-"
+	}
+}
+
+func shouldUseASCII() bool {
+	// Explicit override via environment variable
+	if os.Getenv("BJARNE_ASCII") == "1" {
+		return true
+	}
+	// Disable ASCII override if explicitly disabled
+	if os.Getenv("BJARNE_ASCII") == "0" {
+		return false
+	}
+	// Default to ASCII on macOS due to terminal width calculation issues
+	// with Unicode box-drawing characters in some terminals (Terminal.app)
+	return runtime.GOOS == "darwin"
+}
 
 // Styles for the TUI
 type Styles struct {
@@ -337,14 +369,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ctx.Err() == context.Canceled {
 				return m, nil
 			}
-			// Classification failed - default to NEW MEDIUM and continue
-			m.addOutput(m.styles.Warning.Render("Classification failed, defaulting to NEW MEDIUM"))
+			// Classification failed - default to NEW MEDIUM and continue silently
 			m.intent = "NEW"
 			m.difficulty = "MEDIUM"
 			return m.startThinking(m.getModelForComplexity("MEDIUM"))
 		}
 
-		// Parse the classification result (INTENT COMPLEXITY)
+		// Parse the classification result (INTENT COMPLEXITY) - internal use only
 		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
 		classification := strings.TrimSpace(strings.ToUpper(msg.result.Text))
 		parts := strings.Fields(classification)
@@ -377,91 +408,66 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.difficulty = "MEDIUM"
 		}
 
-		// Show classification result
-		m.addOutput("")
-		var intentDisplay, diffDisplay string
-		switch m.intent {
-		case "NEW":
-			intentDisplay = m.styles.Info.Render("[NEW]")
-		case "CONTINUE":
-			intentDisplay = m.styles.Accent.Render("[CONTINUE]")
-		case "QUESTION":
-			intentDisplay = m.styles.Dim.Render("[QUESTION]")
-		}
-		switch m.difficulty {
-		case "EASY":
-			diffDisplay = m.styles.Success.Render("[EASY]")
-		case "MEDIUM":
-			diffDisplay = m.styles.Warning.Render("[MEDIUM]")
-		case "COMPLEX":
-			diffDisplay = m.styles.Error.Render("[COMPLEX]")
-		}
-		m.addOutput(fmt.Sprintf("Intent: %s  Complexity: %s", intentDisplay, diffDisplay))
-
-		// Select model based on complexity and start analysis
+		// Silently continue to analysis - no clinical output
 		model := m.getModelForComplexity(m.difficulty)
 		return m.startThinking(model)
 
 	case thinkingDoneMsg:
 		if msg.err != nil {
 			if m.ctx.Err() == context.Canceled {
-				// Already handled by Esc
 				return m, nil
 			}
-			m.addOutput(m.styles.Error.Render("Analysis failed: " + msg.err.Error()))
+			m.addOutput(m.styles.Error.Render("Error: " + msg.err.Error()))
 			m.state = StateInput
 			m.textarea.Focus()
 			return m, nil
 		}
-		// Show analysis from the appropriate model (already selected by classification)
 		m.tokenTracker.Add(msg.result.InputTokens, msg.result.OutputTokens)
 		m.conversation = append(m.conversation, Message{Role: "assistant", Content: msg.result.Text})
 
 		// Parse and clean the response (remove difficulty tag if present)
 		_, reflection := parseDifficulty(msg.result.Text)
-
-		// Show analysis box
-		m.addOutput("")
-		m.drawBox("ANALYSIS", 56)
-		m.addOutput("")
-
-		// Display analysis with word wrapping
 		cleanText := stripMarkdown(reflection)
+
+		// Handle based on intent
+		if m.intent == "QUESTION" {
+			// For questions, just show the answer naturally
+			m.addOutput("")
+			lines := wrapText(cleanText, 76)
+			for _, line := range lines {
+				m.addOutput(line)
+			}
+			m.state = StateInput
+			m.textarea.Focus()
+			return m, textarea.Blink
+		}
+
+		// Check if the LLM refused to proceed
+		if containsRefusal(reflection) {
+			m.addOutput("")
+			lines := wrapText(cleanText, 76)
+			for _, line := range lines {
+				m.addOutput(line)
+			}
+			m.state = StateInput
+			m.textarea.Focus()
+			return m, textarea.Blink
+		}
+
+		// Auto-proceed for EASY tasks or CONTINUE intent (no questions)
+		if (m.difficulty == "EASY" || m.intent == "CONTINUE") && !containsQuestion(reflection) {
+			m.conversation = append(m.conversation, Message{Role: "user", Content: GenerateNowPrompt})
+			return m.startGenerating()
+		}
+
+		// For tasks that need confirmation, show the analysis conversationally
+		m.addOutput("")
 		lines := wrapText(cleanText, 76)
 		for _, line := range lines {
 			m.addOutput(line)
 		}
 		m.addOutput("")
 
-		// Handle based on intent
-		if m.intent == "QUESTION" {
-			// For questions, the analysis IS the response - no code generation
-			m.addOutput("")
-			m.addOutput(m.styles.Dim.Render("(Question answered - no code to generate)"))
-			m.state = StateInput
-			m.textarea.Focus()
-			return m, textarea.Blink
-		}
-
-		// Check if the LLM refused to proceed (e.g., "I won't generate buggy code")
-		if containsRefusal(reflection) {
-			m.addOutput("")
-			m.addOutput(m.styles.Warning.Render("(Analysis declined to proceed - no code to generate)"))
-			m.state = StateInput
-			m.textarea.Focus()
-			return m, textarea.Blink
-		}
-
-		// Auto-proceed conditions (T-038f):
-		// - EASY tasks: straightforward, no need to confirm
-		// - CONTINUE intent: user is iterating on existing code
-		// But only if the analysis doesn't ask clarifying questions
-		if (m.difficulty == "EASY" || m.intent == "CONTINUE") && !containsQuestion(reflection) {
-			m.conversation = append(m.conversation, Message{Role: "user", Content: GenerateNowPrompt})
-			return m.startGenerating()
-		}
-
-		// For NEW MEDIUM/COMPLEX: wait for user input before generating
 		m.analyzed = true // Next input goes to acknowledgment
 		m.state = StateInput
 		m.textarea.Focus()
@@ -748,18 +754,16 @@ func (m Model) View() string {
 		b.WriteString(m.textarea.View())
 
 	case StateClassifying, StateThinking, StateAcknowledging, StateGenerating, StateValidating, StateFixing, StateReviewing:
+		// Claude Code-style status: * Doing something… (esc to interrupt · 3s)
 		elapsed := time.Since(m.startTime).Seconds()
 		status := fmt.Sprintf("esc to interrupt · %.0fs", elapsed)
-		if m.tokenCount > 0 {
-			status += fmt.Sprintf(" · ↓ %d tokens", m.tokenCount)
-		}
-		b.WriteString(m.styles.Accent.Render(m.spinner.View()) + " ")
-		b.WriteString(m.statusMsg + " ")
-		b.WriteString(m.styles.Dim.Render("(" + status + ")"))
+
+		b.WriteString(m.styles.Accent.Render("* "))
+		b.WriteString(m.statusMsg)
+		b.WriteString(m.styles.Dim.Render(" (" + status + ")"))
 
 	case StateRevealing:
 		// Don't show progress - the scrolling code is visual feedback
-		// Showing progress here causes display overlap with addOutput()
 		b.WriteString("")
 	}
 
@@ -771,28 +775,6 @@ func (m Model) View() string {
 func (m *Model) addOutput(line string) {
 	// Print directly to stdout for permanent history (scrollback)
 	fmt.Println(line)
-}
-
-// drawBox creates a bordered box with a title
-func (m *Model) drawBox(title string, width int) {
-	// Calculate inner width (excluding the border characters)
-	innerWidth := width
-	titleLen := len(title)
-
-	// If title is longer than width, expand the box
-	if titleLen > innerWidth {
-		innerWidth = titleLen + 4 // Add some padding
-	}
-
-	// Calculate padding for centering
-	totalPadding := innerWidth - titleLen
-	leftPad := totalPadding / 2
-	rightPad := totalPadding - leftPad
-
-	// Draw box
-	m.addOutput(m.styles.Warning.Render(boxTopLeft + strings.Repeat(boxHorizontal, innerWidth) + boxTopRight))
-	m.addOutput(m.styles.Warning.Render(boxVertical + strings.Repeat(" ", leftPad) + title + strings.Repeat(" ", rightPad) + boxVertical))
-	m.addOutput(m.styles.Warning.Render(boxBottomLeft + strings.Repeat(boxHorizontal, innerWidth) + boxBottomRight))
 }
 
 // debugLog writes a message to the debug log file if debug mode is enabled
@@ -857,7 +839,7 @@ func (m *Model) debugLogValidationResults(results []ValidationResult) {
 
 func (m *Model) startClassifying(prompt string) (Model, tea.Cmd) {
 	m.state = StateClassifying
-	m.statusMsg = "Classifying complexity…"
+	m.statusMsg = "Thinking…"
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
@@ -882,18 +864,6 @@ func (m *Model) startClassifying(prompt string) (Model, tea.Cmd) {
 	// Store original prompt and parse example tests
 	m.originalPrompt = prompt
 	m.examples = ParseExampleTests(prompt)
-
-	// Show the request
-	m.addOutput("")
-	m.addOutput(m.styles.Info.Render("Request: ") + fmt.Sprintf("%q", prompt))
-
-	// If we found example tests, show them
-	if m.examples != nil && len(m.examples.Tests) > 0 {
-		m.addOutput("")
-		m.addOutput(m.styles.Success.Render(fmt.Sprintf("Found %d example test(s) - will validate against them", len(m.examples.Tests))))
-	}
-
-	m.addOutput("")
 
 	// Add user message to conversation
 	m.conversation = append(m.conversation, Message{Role: "user", Content: prompt})
@@ -934,11 +904,7 @@ func (m *Model) getModelForComplexity(difficulty string) string {
 
 func (m *Model) startThinking(model string) (Model, tea.Cmd) {
 	m.state = StateThinking
-	if m.intent == "QUESTION" {
-		m.statusMsg = "Answering…"
-	} else {
-		m.statusMsg = "Analyzing…"
-	}
+	m.statusMsg = "Thinking…"
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
@@ -967,7 +933,7 @@ func (m *Model) doThinking(ctx context.Context, model string, intent string) tea
 
 func (m *Model) startAcknowledging() (Model, tea.Cmd) {
 	m.state = StateAcknowledging
-	m.statusMsg = "Processing response..."
+	m.statusMsg = "Thinking…"
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
@@ -995,15 +961,12 @@ func (m *Model) startGenerating() (Model, tea.Cmd) {
 	// Use model based on complexity (EASY=Haiku, MEDIUM=Sonnet, COMPLEX=Opus)
 	model := m.getModelForComplexity(m.difficulty)
 
-	m.statusMsg = "Generating code…"
+	m.statusMsg = "Writing code…"
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
 	// Reset escalation state for fresh generation cycle
 	m.resetEscalation()
-
-	m.addOutput("")
-	m.addOutput(m.styles.Info.Render("Generating code..."))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx = ctx
@@ -1120,11 +1083,8 @@ func (m *Model) getChunkFilePath(fileID int64) string {
 
 func (m *Model) startValidation() (Model, tea.Cmd) {
 	m.state = StateValidating
-	m.statusMsg = "Running validation gates…"
+	m.statusMsg = "Validating…"
 	m.startTime = time.Now()
-
-	m.addOutput("")
-	m.addOutput(m.styles.Info.Render("Validating code..."))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx = ctx
@@ -1169,12 +1129,11 @@ func (m *Model) doValidation(ctx context.Context) tea.Cmd {
 // startReviewing initiates the LLM code review gate
 func (m *Model) startReviewing(results []ValidationResult) (Model, tea.Cmd) {
 	m.state = StateReviewing
-	m.statusMsg = "Code review…"
+	m.statusMsg = "Reviewing code…"
 	m.startTime = time.Now()
 
-	// Show sanitizer gate results first
+	// Show sanitizer gate results
 	m.showValidationSuccess(results)
-	m.addOutput(m.styles.Info.Render("  ├─ Gate: review..."))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx = ctx
@@ -1346,7 +1305,7 @@ func (m *Model) startFix() (Model, tea.Cmd) {
 	currentModel := m.getCurrentModel()
 
 	m.state = StateFixing
-	m.statusMsg = fmt.Sprintf("Fixing code (attempt %d/15)…", m.totalFixAttempts)
+	m.statusMsg = fmt.Sprintf("Fixing issues (%d/15)…", m.totalFixAttempts)
 	m.startTime = time.Now()
 	m.tokenCount = 0
 
@@ -1880,15 +1839,19 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 // printSplashScreen displays the bjarne logo and version
 func printSplashScreen() {
 	// ASCII art logo - stylized "bjarne" text
-	logo := `
-    ╔══════════════════════════════════════════════════════════════╗
-    ║   _     _                                                    ║
-    ║  | |__ (_) __ _ _ __ _ __   ___                              ║
-    ║  | '_ \| |/ _` + "`" + ` | '__| '_ \ / _ \                             ║
-    ║  | |_) | | (_| | |  | | | |  __/                             ║
-    ║  |_.__// |\__,_|_|  |_| |_|\___|                             ║
-    ║      |__/                                                    ║
-    ╚══════════════════════════════════════════════════════════════╝`
+	// Use dynamic box characters to handle macOS terminal issues
+	top := boxTopLeft + strings.Repeat(boxHorizontal, 62) + boxTopRight
+	bot := boxBottomLeft + strings.Repeat(boxHorizontal, 62) + boxBottomRight
+	v := boxVertical
+	logo := fmt.Sprintf(`
+    %s
+    %s   _     _                                                    %s
+    %s  | |__ (_) __ _ _ __ _ __   ___                              %s
+    %s  | '_ \| |/ _`+"`"+` | '__| '_ \ / _ \                             %s
+    %s  | |_) | | (_| | |  | | | |  __/                             %s
+    %s  |_.__// |\__,_|_|  |_| |_|\___|                             %s
+    %s      |__/                                                    %s
+    %s`, top, v, v, v, v, v, v, v, v, v, v, v, v, bot)
 	fmt.Println("\033[96m" + logo + "\033[0m")
 	fmt.Printf("    \033[90m%s - AI-assisted C/C++ with mandatory validation\033[0m\n\n", Version)
 }
@@ -1985,7 +1948,8 @@ func StartTUI() error {
 	m.workspaceIndex = workspaceIndex
 	m.vectorIndex = vectorIndex
 	// Don't use WithAltScreen() - keeps normal terminal scrollback history
-	p := tea.NewProgram(m)
+	// Use WithInputTTY to ensure proper terminal input handling on Windows
+	p := tea.NewProgram(m, tea.WithInputTTY())
 
 	_, err = p.Run()
 	return err
