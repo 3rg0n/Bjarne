@@ -15,6 +15,15 @@ AI-assisted C/C++ code generation with mandatory validation.
 4. Failed gates → AI fixes automatically → re-validate
 5. Only validated code is presented to you
 
+## Key Features
+
+- **Multi-provider support** - AWS Bedrock, Anthropic, OpenAI, or Google Gemini
+- **Auto-escalation** - Starts with fast/cheap models, escalates to powerful models if fixes fail
+- **Workspace indexing** - `/init` indexes your codebase for context-aware generation
+- **Configurable validation** - Enable/disable specific gates via `/config`
+- **Multi-file projects** - Generates and validates header + implementation pairs
+- **Conversation memory** - Iteratively refine code in a session
+
 **Validation Pipeline:**
 - clang-tidy (static analysis)
 - cppcheck (deep static analysis)
@@ -41,10 +50,12 @@ irm https://raw.githubusercontent.com/3rg0n/bjarne/master/install.ps1 | iex
 
 ### Manual Download
 
-Download binaries from [GitHub Releases](https://github.com/3rg0n/bjarne/releases):
-- `bjarne-linux-amd64` / `bjarne-linux-arm64`
-- `bjarne-darwin-amd64` / `bjarne-darwin-arm64`
-- `bjarne-windows-amd64.exe`
+Download from [GitHub Releases](https://github.com/3rg0n/bjarne/releases):
+- Linux: `bjarne_X.Y.Z_linux_amd64.tar.gz` / `bjarne_X.Y.Z_linux_arm64.tar.gz`
+- macOS: `bjarne_X.Y.Z_darwin_amd64.tar.gz` / `bjarne_X.Y.Z_darwin_arm64.tar.gz`
+- Windows: `bjarne_X.Y.Z_windows_amd64.zip`
+
+Extract and place `bjarne` (or `bjarne.exe`) in your PATH.
 
 ### Requirements
 
@@ -92,8 +103,12 @@ All validation gates passed!
 | `/help` | Show available commands |
 | `/model [haiku\|sonnet\|opus]` | Switch AI model (cost/capability tradeoff) |
 | `/save <filename>` | Save last generated code to file |
-| `/validate` | Validate code from clipboard or paste |
+| `/code` | Show the last generated code |
+| `/validate <file>` | Validate an existing file through all gates |
 | `/init` | Index current workspace for context-aware generation |
+| `/config` | Show/modify validator settings |
+| `/tokens` | Show token usage for current session |
+| `/debug` | Toggle debug mode (logs validation errors to file) |
 | `/clear` | Clear conversation history |
 | `/quit` or `Ctrl+C` | Exit |
 
@@ -112,11 +127,39 @@ Environment variables:
 
 ### Model Selection
 
-| Model | Speed | Cost | Best For |
-|-------|-------|------|----------|
-| `haiku` | Fast | Low | Simple functions, quick iterations |
-| `sonnet` | Medium | Medium | Most tasks (recommended default) |
-| `opus` | Slow | High | Complex algorithms, architecture |
+bjarne uses three model tiers that map to each provider's equivalent:
+
+| Tier | Anthropic | OpenAI | Gemini | Best For |
+|------|-----------|--------|--------|----------|
+| `haiku` | Claude Haiku | GPT-4o-mini | Gemini Flash | Simple functions, quick iterations |
+| `sonnet` | Claude Sonnet | GPT-4o | Gemini Pro | Most tasks (recommended) |
+| `opus` | Claude Opus | o1 | Gemini Pro | Complex algorithms, architecture |
+
+### Provider Setup
+
+**AWS Bedrock** (default):
+```bash
+aws configure  # Set up AWS credentials
+# Uses Claude models via Bedrock - no API key needed
+```
+
+**Anthropic Direct**:
+```bash
+export BJARNE_PROVIDER=anthropic
+export BJARNE_API_KEY=sk-ant-...
+```
+
+**OpenAI**:
+```bash
+export BJARNE_PROVIDER=openai
+export BJARNE_API_KEY=sk-...
+```
+
+**Google Gemini**:
+```bash
+export BJARNE_PROVIDER=gemini
+export BJARNE_API_KEY=...
+```
 
 ## How Validation Works
 
