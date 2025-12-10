@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -1860,47 +1859,19 @@ func printSplashScreen() {
 func StartTUI() error {
 	ctx := context.Background()
 
-	// Load configuration
+	// Load configuration (fast, from disk)
 	cfg := LoadConfig()
 
-	// Show splash screen
+	// Show splash screen immediately
 	printSplashScreen()
 
-	// Check for bjarne updates (non-blocking, silently fails)
-	PrintUpdateNotice()
-
-	// Initialize container runtime (silent unless error)
+	// These checks are fast - do them synchronously
 	container, err := DetectContainerRuntime()
 	if err != nil {
 		fmt.Print(FormatUserError(err))
 		return err
 	}
 
-	// Check if validation image exists
-	if !container.ImageExists(ctx) {
-		if err := handleFirstRunPull(ctx, container); err != nil {
-			fmt.Printf("\033[93mWarning:\033[0m %v\n", err)
-			fmt.Println("         Code generation will work, but validation will be skipped.")
-		}
-	} else {
-		// Only prompt if update available (check silently)
-		if container.CheckForUpdate(ctx) {
-			fmt.Printf("\033[93mContainer update available.\033[0m Pull now? [Y/n] ")
-			reader := bufio.NewReader(os.Stdin)
-			response, _ := reader.ReadString('\n')
-			response = strings.TrimSpace(strings.ToLower(response))
-			if response == "" || response == "y" || response == "yes" {
-				fmt.Print("Pulling... ")
-				if err := container.PullImage(ctx); err != nil {
-					fmt.Printf("\033[93mfailed:\033[0m %v\n", err)
-				} else {
-					fmt.Println("\033[92mdone\033[0m")
-				}
-			}
-		}
-	}
-
-	// Initialize LLM provider
 	providerCfg := cfg.GetProviderConfig()
 	provider, err := NewProvider(ctx, providerCfg)
 	if err != nil {
@@ -1908,47 +1879,50 @@ func StartTUI() error {
 		return err
 	}
 
-	// Show compact status line
-	fmt.Printf("    \033[92m●\033[0m %s  \033[92m●\033[0m %s  ", container.GetBinary(), provider.Name())
+	// Show status line
+	fmt.Printf("    \033[92m●\033[0m %s  \033[92m●\033[0m %s", container.GetBinary(), provider.Name())
 
-	// Try to load existing workspace index
+	// Load workspace index (fast, from disk cache)
 	var workspaceIndex *WorkspaceIndex
 	cwd, _ := os.Getwd()
 	if idx, err := LoadIndex(cwd); err == nil {
 		workspaceIndex = idx
-		fmt.Printf("\033[92m●\033[0m %d files indexed", idx.Summary.TotalFiles)
-	}
-
-	// Try to load existing vector index for semantic search
-	var vectorIndex *VectorIndex
-	vecCfg := DefaultVectorIndexConfig()
-	if vi, err := NewVectorIndex(vecCfg); err == nil {
-		// Check if index has embeddings
-		_, _, embeddings, _ := vi.GetStats(ctx)
-		if embeddings > 0 {
-			// Initialize embedder for search
-			_ = vi.EnsureModel(ctx, nil)
-			vectorIndex = vi
-
-			// Quick incremental update for changed files (non-blocking)
-			go func() {
-				updateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				_ = vi.IndexWorkspaceWithEmbeddings(updateCtx, cwd, nil)
-			}()
-		} else {
-			_ = vi.Close()
-		}
+		fmt.Printf("  \033[92m●\033[0m %d files indexed", idx.Summary.TotalFiles)
 	}
 	fmt.Println()
 	fmt.Println()
 	fmt.Println("    Type your request or /help for commands")
 
+	// Create model and start TUI immediately
 	m := NewModel(provider, container, cfg)
 	m.workspaceIndex = workspaceIndex
-	m.vectorIndex = vectorIndex
+
+	// Do slow operations in background AFTER TUI starts
+	go func() {
+		// Check for updates silently
+		PrintUpdateNotice()
+
+		// Check container image in background
+		if !container.ImageExists(ctx) {
+			// Will prompt on first validation attempt
+		}
+
+		// Load vector index in background
+		vecCfg := DefaultVectorIndexConfig()
+		if vi, errVec := NewVectorIndex(vecCfg); errVec == nil {
+			_, _, embeddings, _ := vi.GetStats(ctx)
+			if embeddings > 0 {
+				modelCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				_ = vi.EnsureModel(modelCtx, nil)
+				cancel()
+				m.vectorIndex = vi
+			} else {
+				_ = vi.Close()
+			}
+		}
+	}()
+
 	// Don't use WithAltScreen() - keeps normal terminal scrollback history
-	// Use WithInputTTY to ensure proper terminal input handling on Windows
 	p := tea.NewProgram(m, tea.WithInputTTY())
 
 	_, err = p.Run()
