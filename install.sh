@@ -17,25 +17,6 @@ info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
-# Detect OS and architecture
-detect_platform() {
-    local os arch
-
-    case "$(uname -s)" in
-        Linux*)  os="linux" ;;
-        Darwin*) os="darwin" ;;
-        *)       error "Unsupported operating system: $(uname -s)" ;;
-    esac
-
-    case "$(uname -m)" in
-        x86_64|amd64)  arch="amd64" ;;
-        arm64|aarch64) arch="arm64" ;;
-        *)             error "Unsupported architecture: $(uname -m)" ;;
-    esac
-
-    echo "${os}-${arch}"
-}
-
 # Get latest release version from GitHub
 get_latest_version() {
     local version
@@ -48,33 +29,48 @@ get_latest_version() {
 
 # Download and install bjarne
 install_bjarne() {
-    local platform version download_url tmp_file
+    local os arch version version_num tarball download_url tmp_dir
 
     info "Detecting platform..."
-    platform=$(detect_platform)
-    info "Platform: $platform"
+    case "$(uname -s)" in
+        Linux*)  os="linux" ;;
+        Darwin*) os="darwin" ;;
+        *)       error "Unsupported operating system: $(uname -s)" ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64)  arch="amd64" ;;
+        arm64|aarch64) arch="arm64" ;;
+        *)             error "Unsupported architecture: $(uname -m)" ;;
+    esac
+    info "Platform: ${os}-${arch}"
 
     info "Fetching latest version..."
     version=$(get_latest_version)
     info "Latest version: $version"
 
-    # Construct download URL
-    download_url="https://github.com/${REPO}/releases/download/${version}/bjarne-${platform}"
-    info "Downloading from: $download_url"
+    # goreleaser creates versioned tar.gz archives: bjarne_0.1.5_linux_amd64.tar.gz
+    version_num="${version#v}"  # Remove 'v' prefix
+    tarball="bjarne_${version_num}_${os}_${arch}.tar.gz"
+    download_url="https://github.com/${REPO}/releases/download/${version}/${tarball}"
+    info "Downloading: $tarball"
 
     # Create install directory
     mkdir -p "$INSTALL_DIR"
 
-    # Download binary
-    tmp_file=$(mktemp)
-    if ! curl -fsSL "$download_url" -o "$tmp_file"; then
-        rm -f "$tmp_file"
+    # Download and extract
+    tmp_dir=$(mktemp -d)
+    if ! curl -fsSL "$download_url" -o "${tmp_dir}/${tarball}"; then
+        rm -rf "$tmp_dir"
         error "Failed to download bjarne"
     fi
 
-    # Install binary
-    mv "$tmp_file" "${INSTALL_DIR}/bjarne"
+    # Extract and install
+    tar -xzf "${tmp_dir}/${tarball}" -C "$tmp_dir"
+    mv "${tmp_dir}/bjarne" "${INSTALL_DIR}/bjarne"
     chmod +x "${INSTALL_DIR}/bjarne"
+
+    # Cleanup
+    rm -rf "$tmp_dir"
 
     info "Installed bjarne to ${INSTALL_DIR}/bjarne"
 }

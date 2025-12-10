@@ -115,9 +115,10 @@ if ($Version -eq "latest") {
 }
 Write-Host "  Version: $Version"
 
-# Download URL - binary is released as standalone .exe
-$exeName = "bjarne-windows-$arch.exe"
-$downloadUrl = "https://github.com/$RepoOwner/$RepoName/releases/download/$Version/$exeName"
+# Download URL - goreleaser creates versioned zip archives
+$versionNum = $Version -replace '^v', ''
+$zipName = "bjarne_${versionNum}_windows_$arch.zip"
+$downloadUrl = "https://github.com/$RepoOwner/$RepoName/releases/download/$Version/$zipName"
 
 Write-Step "Downloading bjarne $Version..."
 
@@ -127,10 +128,22 @@ if (-not (Test-Path $InstallDir)) {
 }
 
 $destPath = Join-Path $InstallDir "bjarne.exe"
+$zipPath = Join-Path $env:TEMP $zipName
 
 try {
-    Invoke-WebRequest -Uri $downloadUrl -OutFile $destPath
-    Write-Success "Downloaded bjarne.exe"
+    # Download zip archive
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath
+    Write-Success "Downloaded $zipName"
+
+    # Extract bjarne.exe from zip
+    Write-Host "  Extracting..."
+    Expand-Archive -Path $zipPath -DestinationPath $env:TEMP -Force
+    $extractedExe = Join-Path $env:TEMP "bjarne.exe"
+    Move-Item -Path $extractedExe -Destination $destPath -Force
+
+    # Cleanup
+    Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+    Write-Success "Installed bjarne.exe"
 }
 catch {
     throw "Failed to download bjarne: $_"
